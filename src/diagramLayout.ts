@@ -50,6 +50,8 @@ export interface RadialNode {
   maxChars: number;
   /** id of the article this node's PillarOf points to (may live in another cluster) — drives cross-cluster links. */
   linksTo: string | null;
+  /** monthly search volume, shown as a smaller line under the title; null if not provided. */
+  volume: number | null;
 }
 
 export interface ClusterLayout {
@@ -230,6 +232,7 @@ function buildSingleCluster(
     fontSize: Math.max(9, Math.round(15 * rootScale)),
     maxChars: Math.max(6, Math.round(12 * rootScale)),
     linksTo: pillar?.linksTo ?? null,
+    volume: pillar?.volume ?? null,
   };
 
   const fontSize = Math.max(8, Math.round((13 * childR) / CHILD_R_BASE));
@@ -249,6 +252,7 @@ function buildSingleCluster(
       fontSize,
       maxChars,
       linksTo: a.linksTo,
+      volume: a.volume,
     };
   });
 
@@ -338,4 +342,47 @@ export function wrapLabel(text: string, maxCharsPerLine: number): string[] {
   }
   if (current) lines.push(current);
   return lines.slice(0, 4);
+}
+
+/** "12345" -> "12.345" (Vietnamese thousands separator), for the volume line under a title. */
+export function formatVolume(n: number): string {
+  return n.toLocaleString("vi-VN");
+}
+
+export interface LabelLayout {
+  titleLines: string[];
+  lineHeight: number;
+  /** y of the first title line, relative to the node's center. */
+  startY: number;
+  volumeText: string | null;
+  volumeFontSize: number;
+  /** y of the volume line, relative to the node's center; only meaningful when volumeText is set. */
+  volumeY: number;
+}
+
+/**
+ * Vertical layout for a node's label (wrapped title, plus an optional smaller search-volume line
+ * right below it), centered as one block on the node. Shared by the on-screen SVG renderer and the
+ * PDF exporter so the two never drift apart.
+ */
+export function computeLabelLayout(node: RadialNode): LabelLayout {
+  const titleLines = wrapLabel(node.title, node.maxChars);
+  const lineHeight = node.fontSize * 1.15;
+  const hasVolume = node.volume != null;
+  const volumeFontSize = Math.max(7, Math.round(node.fontSize * 0.7));
+  const volumeLineHeight = volumeFontSize * 1.15;
+  const gap = 2;
+  const totalHeight = titleLines.length * lineHeight + (hasVolume ? gap + volumeLineHeight : 0);
+  const startY = -totalHeight / 2 + lineHeight / 2;
+  const volumeY = hasVolume
+    ? startY + (titleLines.length - 1) * lineHeight + lineHeight / 2 + gap + volumeLineHeight / 2
+    : 0;
+  return {
+    titleLines,
+    lineHeight,
+    startY,
+    volumeText: hasVolume ? formatVolume(node.volume as number) : null,
+    volumeFontSize,
+    volumeY,
+  };
 }

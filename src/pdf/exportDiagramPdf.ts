@@ -1,5 +1,5 @@
 import { jsPDF } from "jspdf";
-import { wrapLabel, type Bounds, type ClusterLayout, type CrossLink, type RadialNode } from "../diagramLayout";
+import { computeLabelLayout, type Bounds, type ClusterLayout, type CrossLink, type RadialNode } from "../diagramLayout";
 import { FONT_NAME, registerVietnameseFont } from "./fonts";
 import { estimatePageGrid, type Grid, type PageFormatId } from "./pageFormats";
 
@@ -155,16 +155,26 @@ function drawTile(
     doc.setFillColor(r, g, b);
     doc.circle(tx(node.cx), ty(node.cy), node.r * scale, "F");
 
-    const fontSize = Math.max(3, node.fontSize * scale);
-    const lines = wrapLabel(node.title, node.maxChars);
-    const lineHeight = fontSize * 1.15;
+    const label = computeLabelLayout(node);
+    const cx = tx(node.cx);
+    const cy = ty(node.cy);
+
     doc.setFont(FONT_NAME, "bold");
-    doc.setFontSize(fontSize);
+    doc.setFontSize(Math.max(3, node.fontSize * scale));
     doc.setTextColor(255, 255, 255);
-    const startY = ty(node.cy) - ((lines.length - 1) * lineHeight) / 2;
-    lines.forEach((line, i) => {
-      doc.text(line, tx(node.cx), startY + i * lineHeight, { align: "center", baseline: "middle" });
+    label.titleLines.forEach((line, i) => {
+      doc.text(line, cx, cy + (label.startY + i * label.lineHeight) * scale, {
+        align: "center",
+        baseline: "middle",
+      });
     });
+
+    if (label.volumeText) {
+      doc.setFont(FONT_NAME, "normal");
+      doc.setFontSize(Math.max(3, label.volumeFontSize * scale));
+      doc.setTextColor(235, 235, 235);
+      doc.text(label.volumeText, cx, cy + label.volumeY * scale, { align: "center", baseline: "middle" });
+    }
   }
 
   if (showPageLabel) {

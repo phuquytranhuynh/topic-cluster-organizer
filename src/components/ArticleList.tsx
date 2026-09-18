@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { formatVolume } from "../diagramLayout";
 import { useStore } from "../store";
 import type { Article, ArticleRole } from "../types";
 
@@ -10,9 +11,10 @@ function EditRow({ article, onDone }: { article: Article; onDone: () => void }) 
   const [role, setRole] = useState<ArticleRole>(article.role);
   const pillar = articles.find((a) => a.id === article.linksTo);
   const [pillarOf, setPillarOf] = useState(pillar?.title ?? "");
+  const [volume, setVolume] = useState(article.volume != null ? String(article.volume) : "");
 
   function save() {
-    updateArticle(article.id, { title, url, role, pillarOf });
+    updateArticle(article.id, { title, url, role, pillarOf, volume: volume ? parseInt(volume, 10) : null });
     onDone();
   }
 
@@ -37,6 +39,9 @@ function EditRow({ article, onDone }: { article: Article; onDone: () => void }) 
           onChange={(e) => setPillarOf(e.target.value)}
           placeholder={role === "pillar" ? "Nhánh con của (cụm khác)" : "Tên bài Pillar"}
         />
+      </td>
+      <td>
+        <input type="number" min="0" value={volume} onChange={(e) => setVolume(e.target.value)} placeholder="Volume" />
       </td>
       <td className="actions">
         <button type="button" onClick={save}>
@@ -104,6 +109,7 @@ export function ArticleList() {
                     <th>Cluster</th>
                     <th>Role</th>
                     <th>Pillar Of</th>
+                    <th>Volume</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -120,6 +126,7 @@ export function ArticleList() {
                           <span className={`badge ${a.role}`}>{a.role === "pillar" ? "Pillar" : "Supporting"}</span>
                         </td>
                         <td>{articles.find((x) => x.id === a.linksTo)?.title ?? "—"}</td>
+                        <td>{a.volume != null ? formatVolume(a.volume) : "—"}</td>
                         <td className="actions">
                           <button type="button" onClick={() => setEditingId(a.id)}>
                             Sửa

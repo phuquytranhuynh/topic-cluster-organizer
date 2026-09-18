@@ -4,7 +4,9 @@ Công cụ sắp xếp danh sách bài viết của website thành sơ đồ **T
 
 ## Tính năng (MVP)
 
-- **Nhập từ CSV**: tải lên file CSV danh sách bài viết đã có sẵn logic cụm (cột `Title`, `URL`, `TopicCluster`, `Role`, `PillarOf`).
+- **Nhập từ CSV**: 2 định dạng —
+  - **Cột chuẩn**: `Title`, `URL`, `TopicCluster`, `Role`, `PillarOf`, `VolumeSearch`.
+  - **Mã vị trí phân cấp**: chỉ cần `Topic` và `Vị trí trong sơ đồ` (mã số dạng cây, ví dụ `0`, `0.1`, `0.1.2`) — hệ thống tự suy ra Pillar/Supporting và liên kết cụm từ cấu trúc vị trí, không cần khai báo Role/PillarOf thủ công.
 - **Nhập tay**: thêm từng bài viết, chọn/gán vào một cụm Topic Cluster có sẵn hoặc tạo cụm mới, đánh dấu vai trò Pillar (trụ cột) hoặc Supporting (vệ tinh) và liên kết tới bài Pillar tương ứng.
 - **Danh sách bài viết**: xem, sửa, xóa bài viết theo từng cụm.
 - **Sơ đồ Topic Cluster**: mỗi cụm hiển thị dạng bong bóng tỏa tròn — bài Pillar ở trung tâm, các bài Supporting xoay quanh. Bán kính vòng và cỡ bong bóng tự giãn/co theo số lượng bài trong cụm để không bị chồng lấn dù một cụm có vài chục bài.
@@ -16,9 +18,12 @@ Công cụ sắp xếp danh sách bài viết của website thành sơ đồ **T
 - **Xuất PDF dạng vector**: vẽ trực tiếp bằng jsPDF (không qua ảnh raster) nên zoom sâu trong PDF chữ vẫn sắc nét. Font Roboto được nhúng sẵn để hiển thị đúng dấu tiếng Việt. Hai chế độ:
   - **Một trang duy nhất**: toàn bộ sơ đồ nằm gọn 1 trang PDF, đúng kích thước gốc. Nếu sơ đồ quá lớn vượt khổ trang tối đa mà trình đọc PDF hỗ trợ, hệ thống tự thu nhỏ tỉ lệ để vừa 1 trang (vẫn là vector, zoom trên máy tính vẫn nét — chỉ in giấy sẽ khó đọc hơn).
   - **Chia nhiều trang theo khổ giấy** (A4/A3/A2/A1/A0 ngang): phù hợp khi cần in giấy khổ lớn (poster) cho sơ đồ có hàng nghìn bài viết — các trang có viền chồng lấn để không cắt đứt bong bóng ở mép, kèm trang bìa dạng bản đồ lưới để biết trang nào ghép ở đâu.
+- **Volume Search**: nhập lượt tìm kiếm/tháng cho mỗi bài viết (qua CSV, form nhập tay, hoặc sửa trong Danh sách bài viết) — hiển thị thành 1 dòng số nhỏ ngay bên dưới tiêu đề trong bong bóng, cả trên màn hình lẫn khi xuất PDF.
 - **Xuất / Nhập dữ liệu**: xuất CSV hoặc JSON (sao lưu đầy đủ), nhập lại từ file JSON đã sao lưu. Dữ liệu được lưu tự động trong `localStorage` của trình duyệt.
 
 ## Định dạng CSV
+
+### Cột chuẩn
 
 | Cột | Bắt buộc | Mô tả |
 |---|---|---|
@@ -27,10 +32,22 @@ Công cụ sắp xếp danh sách bài viết của website thành sơ đồ **T
 | `TopicCluster` | Có | Tên cụm chủ đề bài viết thuộc về |
 | `Role` | Không | `Pillar` (trụ cột) hoặc `Supporting` (vệ tinh, mặc định) |
 | `PillarOf` | Không | Bài viết mà dòng này liên kết tới (tìm theo Title, trên toàn bộ dữ liệu chứ không giới hạn trong cụm) |
+| `VolumeSearch` | Không | Lượt tìm kiếm/tháng, hiển thị dưới tiêu đề trong bong bóng |
 
 **Cách nối nhiều level:** `PillarOf` không chỉ dùng cho bài Supporting — khai báo nó ngay trên dòng `Role = Pillar` để trỏ tới 1 bài viết ở **cụm khác**, biến cả cụm đó thành nhánh con của bài viết được trỏ tới. Hai tiêu đề không cần trùng nhau. Lặp lại qua nhiều cụm để tạo chuỗi 3, 4, 5... level. Nếu bỏ trống ở dòng Pillar, cụm đó là gốc (level cao nhất).
 
-Có thể tải file CSV mẫu ngay trong tab "Nhập từ CSV" của ứng dụng (file mẫu có sẵn ví dụ nối 3 level).
+### Mã vị trí phân cấp
+
+| Cột | Bắt buộc | Mô tả |
+|---|---|---|
+| `Topic` | Có | Tiêu đề bài viết |
+| `Vị trí trong sơ đồ` | Có | Mã vị trí dạng cây, phân cấp bằng dấu chấm: `0`, `0.1`, `0.1.2`... |
+| `URL` | Không | Đường dẫn bài viết |
+| `Volume Search` | Không | Lượt tìm kiếm/tháng |
+
+Bài nào **có bài con** (tồn tại dòng khác với vị trí bắt đầu bằng `vị_trí_của_nó + "."`) tự trở thành **Pillar** của một cụm mới, nối vào bài cha. Bài **không có con** là **Supporting** trong cụm của bài cha. Không cần khai báo Role hay PillarOf thủ công.
+
+Có thể tải file CSV mẫu cho từng định dạng ngay trong tab "Nhập từ CSV" của ứng dụng.
 
 ## Định hướng tiếp theo
 

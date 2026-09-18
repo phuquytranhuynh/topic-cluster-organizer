@@ -5,8 +5,8 @@ import {
   buildCrossLinks,
   colorForClusterIndex,
   computeBounds,
+  computeLabelLayout,
   layoutDiagram,
-  wrapLabel,
   type ClusterLayout,
   type DiagramLayout,
   type RadialNode,
@@ -140,9 +140,7 @@ export function ClusterDiagram() {
       .attr("fill", (d) => d.fill);
 
     nodeGroups.each(function (d) {
-      const lines = wrapLabel(d.title, d.maxChars);
-      const lineHeight = d.fontSize * 1.15;
-      const startY = -((lines.length - 1) * lineHeight) / 2;
+      const label = computeLabelLayout(d);
       const text = d3
         .select(this)
         .append("text")
@@ -150,16 +148,25 @@ export function ClusterDiagram() {
         .attr("fill", "#fff")
         .attr("font-weight", 700)
         .attr("font-size", d.fontSize);
-      lines.forEach((line, i) => {
+      label.titleLines.forEach((line, i) => {
         text
           .append("tspan")
           .attr("x", 0)
-          .attr("y", startY + i * lineHeight)
+          .attr("y", label.startY + i * label.lineHeight)
           .text(line);
       });
-      if (d.url) {
-        d3.select(this).append("title").text(`${d.title}${d.url ? ` — ${d.url}` : ""}`);
+      if (label.volumeText) {
+        text
+          .append("tspan")
+          .attr("x", 0)
+          .attr("y", label.volumeY)
+          .attr("font-size", label.volumeFontSize)
+          .attr("font-weight", 400)
+          .attr("fill-opacity", 0.85)
+          .text(label.volumeText);
       }
+      const titleAttr = d.volume != null ? `${d.title} (${d.volume.toLocaleString("vi-VN")})` : d.title;
+      d3.select(this).append("title").text(`${titleAttr}${d.url ? ` — ${d.url}` : ""}`);
     });
 
     function moveNode(node: RadialNode, x: number, y: number) {

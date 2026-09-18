@@ -14,6 +14,8 @@ export interface Article {
   role: ArticleRole;
   /** id of the pillar article this one supports; null for pillar articles or unlinked supporting articles */
   linksTo: string | null;
+  /** monthly search volume for this keyword/topic, shown under the title in the diagram; null if unknown */
+  volume: number | null;
   notes: string;
   createdAt: string;
   updatedAt: string;

@@ -28,6 +28,7 @@ export function ExportPanel() {
       TopicCluster: clusters.find((c) => c.id === a.clusterId)?.name ?? "",
       Role: a.role === "pillar" ? "Pillar" : "Supporting",
       PillarOf: articles.find((p) => p.id === a.linksTo)?.title ?? "",
+      VolumeSearch: a.volume != null ? String(a.volume) : "",
     }));
     download("topic-clusters.csv", toCsv(rows), "text/csv");
   }

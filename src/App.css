@@ -70,6 +70,24 @@
   margin-bottom: 14px;
 }
 
+.format-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-bottom: 14px;
+  font-size: 13.5px;
+  color: var(--text-h);
+}
+.format-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.format-toggle input {
+  width: auto;
+}
+
 .errors {
   color: var(--danger);
   font-size: 13.5px;

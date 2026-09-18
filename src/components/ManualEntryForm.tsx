@@ -9,6 +9,7 @@ const emptyForm = {
   role: "supporting" as ArticleRole,
   pillarOf: "",
   notes: "",
+  volume: "",
 };
 
 export function ManualEntryForm() {
@@ -40,6 +41,7 @@ export function ManualEntryForm() {
       role: form.role,
       pillarOf: form.pillarOf || undefined,
       notes: form.notes,
+      volume: form.volume ? parseInt(form.volume, 10) : null,
     });
     setJustAdded(created.title);
     setForm((f) => ({ ...emptyForm, clusterName: f.clusterName, role: f.role }));
@@ -121,6 +123,17 @@ export function ManualEntryForm() {
               <option key={a.id} value={a.title} />
             ))}
           </datalist>
+        </label>
+
+        <label>
+          Volume Search (lượt tìm kiếm/tháng)
+          <input
+            type="number"
+            min="0"
+            value={form.volume}
+            onChange={(e) => setForm((f) => ({ ...f, volume: e.target.value }))}
+            placeholder="VD: 1200"
+          />
         </label>
 
         <label className="full-width">

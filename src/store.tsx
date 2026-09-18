@@ -47,6 +47,8 @@ export interface AddArticleInput {
    */
   pillarOf?: string;
   notes?: string;
+  /** monthly search volume for this keyword/topic, shown under the title in the diagram */
+  volume?: number | null;
 }
 
 interface StoreApi {
@@ -113,6 +115,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           clusterId: cluster.id,
           role: input.role,
           linksTo,
+          volume: input.volume ?? null,
           notes: input.notes?.trim() ?? "",
           createdAt: now,
           updatedAt: now,
@@ -150,6 +153,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 title: patch.title?.trim() ?? a.title,
                 url: patch.url?.trim() ?? a.url,
                 notes: patch.notes?.trim() ?? a.notes,
+                volume: patch.volume !== undefined ? patch.volume : a.volume,
                 clusterId,
                 role,
                 linksTo,
@@ -206,6 +210,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             clusterId: cluster.id,
             role: row.role,
             linksTo: null,
+            volume: row.volume,
             notes: "",
             createdAt: now,
             updatedAt: now,
