@@ -7,14 +7,35 @@ const RING_R_BASE = 158;
 const NODE_GAP = 10;
 const CLUSTER_MARGIN = 60;
 
-export const PALETTE: { root: string; child: string }[] = [
-  { root: "#1f6fd1", child: "#1c2541" },
-  { root: "#1c2541", child: "#e0212b" },
-  { root: "#0d9488", child: "#0f766e" },
-  { root: "#7c3aed", child: "#4c1d95" },
-  { root: "#ea580c", child: "#7c2d12" },
-  { root: "#be185d", child: "#701a3a" },
-];
+/** Successive multiples of the golden angle spread hues evenly around the wheel with no exact repeats. */
+const GOLDEN_ANGLE = 137.50776405003785;
+
+/** h in degrees [0,360); s, l as fractions [0,1]. */
+function hslToHex(h: number, s: number, l: number): string {
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const color = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(255 * color)
+      .toString(16)
+      .padStart(2, "0");
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+/**
+ * Deterministic, effectively-unlimited color for a cluster by index — no two clusters ever collide,
+ * unlike a small fixed palette that has to repeat once you run out of entries. Root/child share a hue
+ * (so a cluster still reads as one family) but differ in lightness so the two roles stay visually
+ * distinct from each other too.
+ */
+export function colorForClusterIndex(index: number): { root: string; child: string } {
+  const hue = (index * GOLDEN_ANGLE) % 360;
+  return {
+    root: hslToHex(hue, 0.62, 0.42),
+    child: hslToHex(hue, 0.55, 0.26),
+  };
+}
 
 export interface RadialNode {
   id: string;
@@ -117,7 +138,7 @@ function buildSingleCluster(
   articles: Article[],
   colorIdx: number
 ): { cluster: TopicCluster; colors: { root: string; child: string }; root: RadialNode; children: RadialNode[]; diameter: number } {
-  const colors = PALETTE[colorIdx % PALETTE.length];
+  const colors = colorForClusterIndex(colorIdx);
   const clusterArticles = articles.filter((a) => a.clusterId === cluster.id);
   const pillar = clusterArticles.find((a) => a.role === "pillar");
   const rest = clusterArticles.filter((a) => a.id !== pillar?.id);

@@ -1,9 +1,9 @@
 import * as d3 from "d3";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  PALETTE,
   applyPositionOverrides,
   buildCrossLinks,
+  colorForClusterIndex,
   computeBounds,
   layoutDiagram,
   wrapLabel,
@@ -287,9 +287,9 @@ export function ClusterDiagram() {
     <section className="panel">
       <h2>Sơ đồ Topic Cluster</h2>
       <p className="hint">
-        <span className="legend-dot" style={{ background: PALETTE[0].root }} /> Bài Pillar &nbsp;
-        <span className="legend-dot" style={{ background: PALETTE[0].child }} /> Bài Supporting &nbsp; — mỗi cụm một
-        tông màu riêng. Đường nét đứt nối cụm này với bài viết mà nó khai báo là nhánh con (xem tab "Nhập tay"/CSV,
+        <span className="legend-dot" style={{ background: colorForClusterIndex(0).root }} /> Bài Pillar &nbsp;
+        <span className="legend-dot" style={{ background: colorForClusterIndex(0).child }} /> Bài Supporting &nbsp; —
+        mỗi cụm một tông màu riêng, không trùng với cụm khác. Đường nét đứt nối cụm này với bài viết mà nó khai báo là nhánh con (xem tab "Nhập tay"/CSV,
         cột PillarOf). Kéo bong bóng Pillar để di chuyển cả cụm; kéo bong bóng Supporting để chỉnh riêng nó. Cuộn
         chuột hoặc chụm 2 ngón để zoom, kéo nền trống để di chuyển khung nhìn.
       </p>
