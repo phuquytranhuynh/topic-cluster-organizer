@@ -44,10 +44,58 @@ export interface CrossLink {
   color: string;
 }
 
-export interface DiagramLayout {
-  layouts: ClusterLayout[];
+export interface Bounds {
+  minX: number;
+  minY: number;
   width: number;
   height: number;
+}
+
+export interface DiagramLayout {
+  layouts: ClusterLayout[];
+  bounds: Bounds;
+}
+
+/** Room around a node's true radius reserved for its wrapped label overshooting the circle. */
+const BOUNDS_PADDING = 90;
+
+/**
+ * Bounding box of every node's full extent (radius + label padding). Works for the auto-packed layout
+ * as well as one with manual drag overrides applied — including overrides that push nodes into negative
+ * coordinates — so callers never need to assume the diagram starts at (0, 0).
+ */
+export function computeBounds(layouts: ClusterLayout[]): Bounds {
+  if (layouts.length === 0) return { minX: 0, minY: 0, width: 0, height: 0 };
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const layout of layouts) {
+    for (const node of [layout.root, ...layout.children]) {
+      minX = Math.min(minX, node.cx - node.r - BOUNDS_PADDING);
+      maxX = Math.max(maxX, node.cx + node.r + BOUNDS_PADDING);
+      minY = Math.min(minY, node.cy - node.r - BOUNDS_PADDING);
+      maxY = Math.max(maxY, node.cy + node.r + BOUNDS_PADDING);
+    }
+  }
+  return { minX, minY, width: maxX - minX, height: maxY - minY };
+}
+
+/** Replaces node positions with any manually dragged overrides (keyed by node id), leaving layout shape/colors/links intact. */
+export function applyPositionOverrides(
+  layouts: ClusterLayout[],
+  overrides: Record<string, { x: number; y: number }>
+): ClusterLayout[] {
+  if (Object.keys(overrides).length === 0) return layouts;
+  const withOverride = (node: RadialNode): RadialNode => {
+    const o = overrides[node.id];
+    return o ? { ...node, cx: o.x, cy: o.y } : node;
+  };
+  return layouts.map((layout) => ({
+    ...layout,
+    root: withOverride(layout.root),
+    children: layout.children.map(withOverride),
+  }));
 }
 
 /** Shrinks child bubbles as a cluster gets crowded, so labels stay legible instead of overlapping. */
@@ -122,7 +170,7 @@ function buildSingleCluster(
  * this keeps PDF tiling from degenerating into one absurdly tall column.
  */
 export function layoutDiagram(clusters: TopicCluster[], articles: Article[]): DiagramLayout {
-  if (clusters.length === 0) return { layouts: [], width: 0, height: 0 };
+  if (clusters.length === 0) return { layouts: [], bounds: { minX: 0, minY: 0, width: 0, height: 0 } };
 
   const items = clusters.map((cluster, idx) => buildSingleCluster(cluster, articles, idx));
   const totalArea = items.reduce((sum, it) => sum + it.diameter * it.diameter, 0);
@@ -153,7 +201,7 @@ export function layoutDiagram(clusters: TopicCluster[], articles: Article[]): Di
     rowHeight = Math.max(rowHeight, it.diameter);
   }
 
-  return { layouts, width: maxRowWidth, height: cursorY + rowHeight };
+  return { layouts, bounds: computeBounds(layouts) };
 }
 
 /**

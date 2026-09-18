@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -71,12 +72,16 @@ function findClusterByName(clusters: TopicCluster[], name: string): TopicCluster
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<StoreData>(loadInitial);
 
+  // Persisting here (rather than inside the setState updater below) matters: the updater calls
+  // newId(), so it isn't pure, and React (in StrictMode dev) invokes it twice to check for exactly
+  // that — a second invocation whose result never becomes state but, if persist() ran inside the
+  // updater, would still overwrite localStorage with ids that don't match what's actually rendered.
+  useEffect(() => {
+    persist(data);
+  }, [data]);
+
   const commit = useCallback((updater: (prev: StoreData) => StoreData) => {
-    setData((prev) => {
-      const next = updater(prev);
-      persist(next);
-      return next;
-    });
+    setData((prev) => updater(prev));
   }, []);
 
   const getOrCreateCluster = (clusters: TopicCluster[], name: string): [TopicCluster, TopicCluster[]] => {

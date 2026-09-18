@@ -1,5 +1,5 @@
 import { jsPDF } from "jspdf";
-import { wrapLabel, type ClusterLayout, type CrossLink, type RadialNode } from "../diagramLayout";
+import { wrapLabel, type Bounds, type ClusterLayout, type CrossLink, type RadialNode } from "../diagramLayout";
 import { FONT_NAME, registerVietnameseFont } from "./fonts";
 import { estimatePageGrid, type Grid, type PageFormatId } from "./pageFormats";
 
@@ -162,17 +162,16 @@ function drawTile(
 export interface ExportDiagramPdfOptions {
   layouts: ClusterLayout[];
   crossLinks: CrossLink[];
-  width: number;
-  height: number;
+  bounds: Bounds;
   pageFormat: PageFormatId;
   filename?: string;
 }
 
 export async function exportDiagramToPdf(opts: ExportDiagramPdfOptions): Promise<void> {
-  const { layouts, crossLinks, width, height, pageFormat, filename = "topic-cluster-diagram.pdf" } = opts;
+  const { layouts, crossLinks, bounds, pageFormat, filename = "topic-cluster-diagram.pdf" } = opts;
   if (layouts.length === 0) throw new Error("Không có dữ liệu để xuất.");
 
-  const grid = estimatePageGrid(width, height, pageFormat);
+  const grid = estimatePageGrid(bounds.width, bounds.height, pageFormat);
   const articleCount = layouts.reduce((sum, l) => sum + 1 + l.children.length, 0);
 
   const doc = new jsPDF({ unit: "pt", format: [grid.pageW, grid.pageH], orientation: "landscape" });
@@ -188,8 +187,8 @@ export async function exportDiagramToPdf(opts: ExportDiagramPdfOptions): Promise
       drawTile(doc, {
         layouts,
         crossLinks,
-        offsetX: col * grid.stepX,
-        offsetY: row * grid.stepY,
+        offsetX: bounds.minX + col * grid.stepX,
+        offsetY: bounds.minY + row * grid.stepY,
         pageW: grid.pageW,
         pageH: grid.pageH,
         pageIndex,

@@ -1,30 +1,93 @@
 import * as d3 from "d3";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PALETTE, buildCrossLinks, layoutDiagram, wrapLabel } from "../diagramLayout";
+import {
+  PALETTE,
+  applyPositionOverrides,
+  buildCrossLinks,
+  computeBounds,
+  layoutDiagram,
+  wrapLabel,
+  type ClusterLayout,
+  type DiagramLayout,
+  type RadialNode,
+} from "../diagramLayout";
+import { clearPositions, loadPositions, savePositions, type PositionOverrides } from "../diagramPositions";
 import { PAGE_FORMATS, estimatePageGrid, type PageFormatId } from "../pdf/pageFormats";
 import { useStore } from "../store";
+
+const ZOOM_MIN = 0.05;
+const ZOOM_MAX = 8;
+const ZOOM_STEP = 1.3;
 
 export function ClusterDiagram() {
   const { clusters, articles } = useStore();
   const svgRef = useRef<SVGSVGElement>(null);
+  const zoomBehaviorRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const currentTransformRef = useRef<d3.ZoomTransform | null>(null);
+  const prevBaseLayoutsRef = useRef<DiagramLayout["layouts"] | null>(null);
   const [pageFormat, setPageFormat] = useState<PageFormatId>("a3");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [overrides, setOverrides] = useState<PositionOverrides>(() => loadPositions());
 
-  const { layouts, width, height } = useMemo(() => layoutDiagram(clusters, articles), [clusters, articles]);
+  const { layouts: baseLayouts } = useMemo(() => layoutDiagram(clusters, articles), [clusters, articles]);
+  const layouts = useMemo(() => applyPositionOverrides(baseLayouts, overrides), [baseLayouts, overrides]);
   const crossLinks = useMemo(() => buildCrossLinks(layouts), [layouts]);
+  const bounds = useMemo(() => computeBounds(layouts), [layouts]);
 
-  const pageEstimate = useMemo(() => estimatePageGrid(width, height, pageFormat), [width, height, pageFormat]);
+  const pageEstimate = useMemo(
+    () => estimatePageGrid(bounds.width, bounds.height, pageFormat),
+    [bounds, pageFormat]
+  );
+
+  function commitOverrides(updates: PositionOverrides) {
+    setOverrides((prev) => {
+      const next = { ...prev, ...updates };
+      savePositions(next);
+      return next;
+    });
+  }
+
+  function handleResetPositions() {
+    setOverrides({});
+    clearPositions();
+  }
 
   useEffect(() => {
-    const svg = d3.select(svgRef.current);
+    const svgEl = svgRef.current;
+    if (!svgEl) return;
+    const svg = d3.select(svgEl);
     svg.selectAll("*").remove();
     if (layouts.length === 0) return;
 
-    svg.attr("width", width).attr("height", height).attr("viewBox", `0 0 ${width} ${height}`);
+    const zoomLayer = svg.append("g").attr("class", "zoom-layer");
+    const linkLayer = zoomLayer.append("g").attr("class", "links");
+    const nodeLayer = zoomLayer.append("g").attr("class", "nodes");
 
-    const linkLayer = svg.append("g").attr("class", "links");
-    const nodeLayer = svg.append("g").attr("class", "nodes");
+    // Live positions for this render pass. Drag mutates only this map + the DOM directly (never the
+    // memoized RadialNode objects), so redraws stay driven purely by React state.
+    const livePos = new Map<string, { x: number; y: number }>();
+    const clusterByNodeId = new Map<string, ClusterLayout>();
+    for (const layout of layouts) {
+      for (const node of [layout.root, ...layout.children]) {
+        livePos.set(node.id, { x: node.cx, y: node.cy });
+        clusterByNodeId.set(node.id, layout);
+      }
+    }
+
+    const linesByNodeId = new Map<string, { el: SVGLineElement; end: "from" | "to" }[]>();
+    function addLineRef(nodeId: string, el: SVGLineElement, end: "from" | "to") {
+      let list = linesByNodeId.get(nodeId);
+      if (!list) {
+        list = [];
+        linesByNodeId.set(nodeId, list);
+      }
+      list.push({ el, end });
+    }
+    function registerLine(el: SVGLineElement, fromId: string, toId: string) {
+      addLineRef(fromId, el, "from");
+      addLineRef(toId, el, "to");
+    }
 
     for (const layout of layouts) {
       linkLayer
@@ -36,7 +99,10 @@ export function ClusterDiagram() {
         .attr("x2", (d) => d.to.cx)
         .attr("y2", (d) => d.to.cy)
         .attr("stroke", layout.colors.root)
-        .attr("stroke-width", 2);
+        .attr("stroke-width", 2)
+        .each(function (d) {
+          registerLine(this as SVGLineElement, d.from.id, d.to.id);
+        });
     }
 
     linkLayer
@@ -49,16 +115,24 @@ export function ClusterDiagram() {
       .attr("y2", (d) => d.to.cy)
       .attr("stroke", (d) => d.color)
       .attr("stroke-width", 2)
-      .attr("stroke-dasharray", "6 4");
+      .attr("stroke-dasharray", "6 4")
+      .each(function (d) {
+        registerLine(this as SVGLineElement, d.from.id, d.to.id);
+      });
 
     const allNodes = layouts.flatMap((l) => [l.root, ...l.children]);
+    const groupByNodeId = new Map<string, SVGGElement>();
 
     const nodeGroups = nodeLayer
-      .selectAll("g.node")
+      .selectAll<SVGGElement, RadialNode>("g.node")
       .data(allNodes)
       .join("g")
       .attr("class", "node")
-      .attr("transform", (d) => `translate(${d.cx}, ${d.cy})`);
+      .attr("data-id", (d) => d.id)
+      .attr("transform", (d) => `translate(${d.cx}, ${d.cy})`)
+      .each(function (d) {
+        groupByNodeId.set(d.id, this);
+      });
 
     nodeGroups
       .append("circle")
@@ -87,14 +161,110 @@ export function ClusterDiagram() {
         d3.select(this).append("title").text(`${d.title}${d.url ? ` — ${d.url}` : ""}`);
       }
     });
-  }, [layouts, crossLinks, width, height]);
+
+    function moveNode(node: RadialNode, x: number, y: number) {
+      livePos.set(node.id, { x, y });
+      const g = groupByNodeId.get(node.id);
+      if (g) g.setAttribute("transform", `translate(${x}, ${y})`);
+      const lines = linesByNodeId.get(node.id);
+      if (!lines) return;
+      for (const { el, end } of lines) {
+        el.setAttribute(end === "from" ? "x1" : "x2", String(x));
+        el.setAttribute(end === "from" ? "y1" : "y2", String(y));
+      }
+    }
+
+    const dragBehavior = d3
+      .drag<SVGGElement, RadialNode>()
+      .on("start", function (event) {
+        // Keep the svg-level zoom/pan behavior from also treating this pointerdown as a pan gesture.
+        event.sourceEvent?.stopPropagation();
+        d3.select(this).raise().classed("dragging", true);
+      })
+      .on("drag", function (event, d) {
+        const layout = clusterByNodeId.get(d.id);
+        const moving = d.isRoot && layout ? [layout.root, ...layout.children] : [d];
+        for (const node of moving) {
+          const p = livePos.get(node.id)!;
+          moveNode(node, p.x + event.dx, p.y + event.dy);
+        }
+      })
+      .on("end", function (_event, d) {
+        d3.select(this).classed("dragging", false);
+        const layout = clusterByNodeId.get(d.id);
+        const moved = d.isRoot && layout ? [layout.root, ...layout.children] : [d];
+        const updates: PositionOverrides = {};
+        for (const node of moved) updates[node.id] = livePos.get(node.id)!;
+        commitOverrides(updates);
+      });
+
+    nodeGroups.call(dragBehavior);
+
+    // Pan/zoom the whole canvas. Attached to the svg background; node drags stop propagation above
+    // so the two gestures never fight over the same pointer.
+    const zoomBehavior = d3
+      .zoom<SVGSVGElement, unknown>()
+      .scaleExtent([ZOOM_MIN, ZOOM_MAX])
+      .on("zoom", (event) => {
+        zoomLayer.attr("transform", event.transform.toString());
+        currentTransformRef.current = event.transform;
+      });
+    zoomBehaviorRef.current = zoomBehavior;
+    svg.call(zoomBehavior);
+
+    const viewportW = svgEl.clientWidth || bounds.width;
+    const viewportH = svgEl.clientHeight || bounds.height;
+    const fitScale = Math.min(
+      ZOOM_MAX,
+      Math.max(ZOOM_MIN, Math.min(viewportW / bounds.width, viewportH / bounds.height) * 0.92)
+    );
+    const fitTransform = d3.zoomIdentity
+      .translate(
+        viewportW / 2 - (bounds.minX + bounds.width / 2) * fitScale,
+        viewportH / 2 - (bounds.minY + bounds.height / 2) * fitScale
+      )
+      .scale(fitScale);
+
+    const isNewData = prevBaseLayoutsRef.current !== baseLayouts;
+    prevBaseLayoutsRef.current = baseLayouts;
+
+    if (isNewData || !currentTransformRef.current) {
+      svg.call(zoomBehavior.transform, fitTransform);
+    } else {
+      svg.call(zoomBehavior.transform, currentTransformRef.current);
+    }
+  }, [layouts, crossLinks, bounds, baseLayouts]);
+
+  function zoomBy(factor: number) {
+    const svgEl = svgRef.current;
+    if (!svgEl || !zoomBehaviorRef.current) return;
+    d3.select(svgEl).transition().duration(200).call(zoomBehaviorRef.current.scaleBy, factor);
+  }
+
+  function handleFitToScreen() {
+    const svgEl = svgRef.current;
+    if (!svgEl || !zoomBehaviorRef.current) return;
+    const viewportW = svgEl.clientWidth || bounds.width;
+    const viewportH = svgEl.clientHeight || bounds.height;
+    const fitScale = Math.min(
+      ZOOM_MAX,
+      Math.max(ZOOM_MIN, Math.min(viewportW / bounds.width, viewportH / bounds.height) * 0.92)
+    );
+    const fitTransform = d3.zoomIdentity
+      .translate(
+        viewportW / 2 - (bounds.minX + bounds.width / 2) * fitScale,
+        viewportH / 2 - (bounds.minY + bounds.height / 2) * fitScale
+      )
+      .scale(fitScale);
+    d3.select(svgEl).transition().duration(250).call(zoomBehaviorRef.current.transform, fitTransform);
+  }
 
   async function handleExportPdf() {
     setExporting(true);
     setExportError(null);
     try {
       const { exportDiagramToPdf } = await import("../pdf/exportDiagramPdf");
-      await exportDiagramToPdf({ layouts, crossLinks, width, height, pageFormat });
+      await exportDiagramToPdf({ layouts, crossLinks, bounds, pageFormat });
     } catch (err) {
       setExportError((err as Error).message || "Xuất PDF thất bại.");
     } finally {
@@ -111,13 +281,17 @@ export function ClusterDiagram() {
     );
   }
 
+  const hasOverrides = Object.keys(overrides).length > 0;
+
   return (
     <section className="panel">
       <h2>Sơ đồ Topic Cluster</h2>
       <p className="hint">
         <span className="legend-dot" style={{ background: PALETTE[0].root }} /> Bài Pillar &nbsp;
         <span className="legend-dot" style={{ background: PALETTE[0].child }} /> Bài Supporting &nbsp; — mỗi cụm một
-        tông màu riêng. Đường nét đứt nối các bài viết trùng tên giữa các cụm khác nhau.
+        tông màu riêng. Đường nét đứt nối cụm này với bài viết mà nó khai báo là nhánh con (xem tab "Nhập tay"/CSV,
+        cột PillarOf). Kéo bong bóng Pillar để di chuyển cả cụm; kéo bong bóng Supporting để chỉnh riêng nó. Cuộn
+        chuột hoặc chụm 2 ngón để zoom, kéo nền trống để di chuyển khung nhìn.
       </p>
 
       <div className="row pdf-export-row">
@@ -134,14 +308,31 @@ export function ClusterDiagram() {
         <button type="button" onClick={handleExportPdf} disabled={exporting}>
           {exporting ? "Đang tạo PDF…" : `Xuất PDF (~${pageEstimate.total} trang)`}
         </button>
+        {hasOverrides && (
+          <button type="button" className="secondary" onClick={handleResetPositions}>
+            Đặt lại vị trí
+          </button>
+        )}
         <span className="hint" style={{ marginBottom: 0 }}>
-          Lưới {pageEstimate.cols} cột × {pageEstimate.rows} hàng — PDF dạng vector, zoom sâu vẫn nét.
+          Lưới {pageEstimate.cols} cột × {pageEstimate.rows} hàng — PDF theo đúng vị trí bạn đã sắp xếp, dạng vector
+          nên zoom sâu vẫn nét.
         </span>
       </div>
       {exportError && <p className="errors">{exportError}</p>}
 
       <div className="diagram-scroll">
         <svg ref={svgRef} />
+        <div className="zoom-controls">
+          <button type="button" title="Phóng to" onClick={() => zoomBy(ZOOM_STEP)}>
+            +
+          </button>
+          <button type="button" title="Thu nhỏ" onClick={() => zoomBy(1 / ZOOM_STEP)}>
+            −
+          </button>
+          <button type="button" title="Vừa màn hình" onClick={handleFitToScreen}>
+            ⤢
+          </button>
+        </div>
       </div>
     </section>
   );
