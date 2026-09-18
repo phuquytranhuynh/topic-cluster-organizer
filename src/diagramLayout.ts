@@ -126,26 +126,97 @@ function childRadiusFor(n: number): number {
 }
 
 /** Grows the ring so evenly-spaced children never overlap each other or the root, however many there are. */
-function ringRadiusFor(n: number, childR: number): number {
+function ringRadiusFor(n: number, childR: number, rootR: number, levelScale: number): number {
   if (n === 0) return 0;
   const minChord = 2 * childR + NODE_GAP;
   const bySpacing = n === 1 ? 0 : minChord / (2 * Math.sin(Math.PI / n));
-  return Math.max(RING_R_BASE, ROOT_R + childR + NODE_GAP, bySpacing);
+  return Math.max(RING_R_BASE * levelScale, rootR + childR + NODE_GAP, bySpacing);
+}
+
+interface ClusterMeta {
+  colors: { root: string; child: string };
+  /** 0 for a standalone/root cluster; parentDepth+1 for one chained onto another via PillarOf. */
+  depth: number;
+}
+
+/**
+ * For each cluster, the id of the OTHER cluster it hangs off of — i.e. some article in this cluster
+ * (its Pillar first, else whichever Supporting article declares it) has PillarOf pointing at a node
+ * that lives in a different cluster. Clusters with no such link are standalone/root clusters.
+ */
+function resolveParentClusterIds(articles: Article[]): Map<string, string> {
+  const clusterIdByArticleId = new Map<string, string>();
+  for (const a of articles) clusterIdByArticleId.set(a.id, a.clusterId);
+
+  const parentOf = new Map<string, string>();
+  const pillarsFirst = [...articles].sort((a, b) => Number(a.role !== "pillar") - Number(b.role !== "pillar"));
+  for (const a of pillarsFirst) {
+    if (parentOf.has(a.clusterId) || !a.linksTo) continue;
+    const targetClusterId = clusterIdByArticleId.get(a.linksTo);
+    if (targetClusterId && targetClusterId !== a.clusterId) {
+      parentOf.set(a.clusterId, targetClusterId);
+    }
+  }
+  return parentOf;
+}
+
+/**
+ * Resolves each cluster's color and depth by walking the PillarOf chain: a chained cluster's root
+ * takes its parent's Supporting color (so every cluster chained onto the same parent visually reads
+ * as "part of that branch", duplicates included) and sits one level deeper for sizing purposes. A
+ * standalone cluster — and the fallback for a cycle or a dangling link — gets its own unique hue.
+ */
+function resolveClusterMeta(clusters: TopicCluster[], parentOf: Map<string, string>): Map<string, ClusterMeta> {
+  const clusterIds = new Set(clusters.map((c) => c.id));
+  const meta = new Map<string, ClusterMeta>();
+  const resolving = new Set<string>();
+  let nextIdx = 0;
+
+  function resolve(clusterId: string) {
+    if (meta.has(clusterId)) return;
+    const parentId = parentOf.get(clusterId);
+    if (!parentId || !clusterIds.has(parentId) || resolving.has(clusterId)) {
+      meta.set(clusterId, { colors: colorForClusterIndex(nextIdx++), depth: 0 });
+      return;
+    }
+    resolving.add(clusterId);
+    resolve(parentId);
+    resolving.delete(clusterId);
+    const parentMeta = meta.get(parentId)!;
+    meta.set(clusterId, {
+      colors: { root: parentMeta.colors.child, child: colorForClusterIndex(nextIdx++).child },
+      depth: parentMeta.depth + 1,
+    });
+  }
+
+  for (const c of clusters) resolve(c.id);
+  return meta;
+}
+
+/** Bubbles shrink 5% per hierarchy level, floored so a long chain never collapses to nothing. */
+function levelScaleFor(depth: number): number {
+  return Math.max(0.25, 0.95 ** depth);
 }
 
 function buildSingleCluster(
   cluster: TopicCluster,
   articles: Article[],
-  colorIdx: number
+  meta: ClusterMeta
 ): { cluster: TopicCluster; colors: { root: string; child: string }; root: RadialNode; children: RadialNode[]; diameter: number } {
-  const colors = colorForClusterIndex(colorIdx);
+  const { colors, depth } = meta;
+  // Root vs. its own Supporting bubbles keeps the usual size gap (ROOT_R vs CHILD_R_BASE) at every
+  // level — depth only scales the whole cluster down as one unit the deeper it's chained.
+  const rootScale = levelScaleFor(depth);
+  const childScale = rootScale;
+
   const clusterArticles = articles.filter((a) => a.clusterId === cluster.id);
   const pillar = clusterArticles.find((a) => a.role === "pillar");
   const rest = clusterArticles.filter((a) => a.id !== pillar?.id);
 
   const n = rest.length;
-  const childR = childRadiusFor(n);
-  const ringR = ringRadiusFor(n, childR);
+  const rootR = ROOT_R * rootScale;
+  const childR = childRadiusFor(n) * childScale;
+  const ringR = ringRadiusFor(n, childR, rootR, rootScale);
 
   const root: RadialNode = {
     id: pillar?.id ?? `cluster-${cluster.id}`,
@@ -153,11 +224,11 @@ function buildSingleCluster(
     url: pillar?.url,
     cx: 0,
     cy: 0,
-    r: ROOT_R,
+    r: rootR,
     fill: colors.root,
     isRoot: true,
-    fontSize: 15,
-    maxChars: 12,
+    fontSize: Math.max(9, Math.round(15 * rootScale)),
+    maxChars: Math.max(6, Math.round(12 * rootScale)),
     linksTo: pillar?.linksTo ?? null,
   };
 
@@ -181,7 +252,7 @@ function buildSingleCluster(
     };
   });
 
-  const diameter = 2 * (ringR + childR) + CLUSTER_MARGIN;
+  const diameter = 2 * (ringR + childR) + CLUSTER_MARGIN * rootScale;
   return { cluster, colors, root, children, diameter };
 }
 
@@ -193,7 +264,9 @@ function buildSingleCluster(
 export function layoutDiagram(clusters: TopicCluster[], articles: Article[]): DiagramLayout {
   if (clusters.length === 0) return { layouts: [], bounds: { minX: 0, minY: 0, width: 0, height: 0 } };
 
-  const items = clusters.map((cluster, idx) => buildSingleCluster(cluster, articles, idx));
+  const parentOf = resolveParentClusterIds(articles);
+  const clusterMeta = resolveClusterMeta(clusters, parentOf);
+  const items = clusters.map((cluster) => buildSingleCluster(cluster, articles, clusterMeta.get(cluster.id)!));
   const totalArea = items.reduce((sum, it) => sum + it.diameter * it.diameter, 0);
   const maxRowWidth = Math.max(1600, Math.sqrt(totalArea) * 1.15, ...items.map((it) => it.diameter));
 
