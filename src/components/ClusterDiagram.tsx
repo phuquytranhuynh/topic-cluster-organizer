@@ -1,130 +1,26 @@
 import * as d3 from "d3";
-import { useEffect, useMemo, useRef } from "react";
-import { normalizeKey } from "../csv";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { PALETTE, buildCrossLinks, layoutDiagram, wrapLabel } from "../diagramLayout";
+import { PAGE_FORMATS, estimatePageGrid, type PageFormatId } from "../pdf/pageFormats";
 import { useStore } from "../store";
-import type { TopicCluster } from "../types";
-
-const ROOT_R = 70;
-const CHILD_R = 56;
-const RING_R = 158;
-
-const PALETTE: { root: string; child: string }[] = [
-  { root: "#1f6fd1", child: "#1c2541" },
-  { root: "#1c2541", child: "#e0212b" },
-  { root: "#0d9488", child: "#0f766e" },
-  { root: "#7c3aed", child: "#4c1d95" },
-  { root: "#ea580c", child: "#7c2d12" },
-  { root: "#be185d", child: "#701a3a" },
-];
-
-interface RadialNode {
-  id: string;
-  title: string;
-  url?: string;
-  cx: number;
-  cy: number;
-  r: number;
-  fill: string;
-  isRoot: boolean;
-}
-
-interface ClusterLayout {
-  cluster: TopicCluster;
-  colors: { root: string; child: string };
-  root: RadialNode;
-  children: RadialNode[];
-}
-
-function wrapLabel(text: string, maxCharsPerLine: number): string[] {
-  const words = text.split(/\s+/);
-  const lines: string[] = [];
-  let current = "";
-  for (const w of words) {
-    const attempt = current ? `${current} ${w}` : w;
-    if (attempt.length > maxCharsPerLine && current) {
-      lines.push(current);
-      current = w;
-    } else {
-      current = attempt;
-    }
-  }
-  if (current) lines.push(current);
-  return lines.slice(0, 4);
-}
 
 export function ClusterDiagram() {
   const { clusters, articles } = useStore();
   const svgRef = useRef<SVGSVGElement>(null);
+  const [pageFormat, setPageFormat] = useState<PageFormatId>("a3");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
-  const clusterSize = 2 * (RING_R + CHILD_R) + 30;
-  const cols = Math.max(1, Math.min(clusters.length, Math.floor(1500 / clusterSize) || 1));
+  const { layouts, width, height } = useMemo(() => layoutDiagram(clusters, articles), [clusters, articles]);
+  const crossLinks = useMemo(() => buildCrossLinks(layouts), [layouts]);
 
-  const layouts = useMemo<ClusterLayout[]>(() => {
-    return clusters.map((cluster, idx) => {
-      const colors = PALETTE[idx % PALETTE.length];
-      const clusterArticles = articles.filter((a) => a.clusterId === cluster.id);
-      const pillar = clusterArticles.find((a) => a.role === "pillar");
-      const rest = clusterArticles.filter((a) => a.id !== pillar?.id);
-
-      const col = idx % cols;
-      const row = Math.floor(idx / cols);
-      const cx = col * clusterSize + clusterSize / 2;
-      const cy = row * clusterSize + clusterSize / 2;
-
-      const root: RadialNode = {
-        id: pillar?.id ?? `cluster-${cluster.id}`,
-        title: pillar?.title ?? cluster.name,
-        url: pillar?.url,
-        cx,
-        cy,
-        r: ROOT_R,
-        fill: colors.root,
-        isRoot: true,
-      };
-
-      const n = rest.length;
-      const children: RadialNode[] = rest.map((a, i) => {
-        const angle = n ? (i * (2 * Math.PI)) / n - Math.PI / 2 : 0;
-        return {
-          id: a.id,
-          title: a.title,
-          url: a.url,
-          cx: cx + RING_R * Math.cos(angle),
-          cy: cy + RING_R * Math.sin(angle),
-          r: CHILD_R,
-          fill: colors.child,
-          isRoot: false,
-        };
-      });
-
-      return { cluster, colors, root, children };
-    });
-  }, [clusters, articles, cols, clusterSize]);
-
-  const crossLinks = useMemo(() => {
-    const links: { from: RadialNode; to: RadialNode; color: string }[] = [];
-    for (const layout of layouts) {
-      const rootKey = normalizeKey(layout.root.title);
-      for (const other of layouts) {
-        if (other === layout) continue;
-        for (const child of other.children) {
-          if (normalizeKey(child.title) === rootKey) {
-            links.push({ from: child, to: layout.root, color: layout.colors.root });
-          }
-        }
-      }
-    }
-    return links;
-  }, [layouts]);
+  const pageEstimate = useMemo(() => estimatePageGrid(width, height, pageFormat), [width, height, pageFormat]);
 
   useEffect(() => {
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
     if (layouts.length === 0) return;
 
-    const rows = Math.ceil(layouts.length / cols);
-    const width = cols * clusterSize;
-    const height = rows * clusterSize;
     svg.attr("width", width).attr("height", height).attr("viewBox", `0 0 ${width} ${height}`);
 
     const linkLayer = svg.append("g").attr("class", "links");
@@ -170,8 +66,8 @@ export function ClusterDiagram() {
       .attr("fill", (d) => d.fill);
 
     nodeGroups.each(function (d) {
-      const lines = wrapLabel(d.title, d.isRoot ? 12 : 10);
-      const lineHeight = d.isRoot ? 17 : 14.5;
+      const lines = wrapLabel(d.title, d.maxChars);
+      const lineHeight = d.fontSize * 1.15;
       const startY = -((lines.length - 1) * lineHeight) / 2;
       const text = d3
         .select(this)
@@ -179,7 +75,7 @@ export function ClusterDiagram() {
         .attr("text-anchor", "middle")
         .attr("fill", "#fff")
         .attr("font-weight", 700)
-        .attr("font-size", d.isRoot ? 15 : 13);
+        .attr("font-size", d.fontSize);
       lines.forEach((line, i) => {
         text
           .append("tspan")
@@ -191,7 +87,20 @@ export function ClusterDiagram() {
         d3.select(this).append("title").text(`${d.title}${d.url ? ` — ${d.url}` : ""}`);
       }
     });
-  }, [layouts, crossLinks, cols, clusterSize]);
+  }, [layouts, crossLinks, width, height]);
+
+  async function handleExportPdf() {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const { exportDiagramToPdf } = await import("../pdf/exportDiagramPdf");
+      await exportDiagramToPdf({ layouts, crossLinks, width, height, pageFormat });
+    } catch (err) {
+      setExportError((err as Error).message || "Xuất PDF thất bại.");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   if (clusters.length === 0) {
     return (
@@ -206,9 +115,31 @@ export function ClusterDiagram() {
     <section className="panel">
       <h2>Sơ đồ Topic Cluster</h2>
       <p className="hint">
-        Mỗi cụm hiển thị bài Pillar ở trung tâm và các bài liên quan xoay quanh. Đường nét đứt nối các bài viết trùng
-        tên giữa các cụm khác nhau — thể hiện chủ đề đó vừa là bài vệ tinh ở cụm này, vừa là trụ cột ở cụm khác.
+        <span className="legend-dot" style={{ background: PALETTE[0].root }} /> Bài Pillar &nbsp;
+        <span className="legend-dot" style={{ background: PALETTE[0].child }} /> Bài Supporting &nbsp; — mỗi cụm một
+        tông màu riêng. Đường nét đứt nối các bài viết trùng tên giữa các cụm khác nhau.
       </p>
+
+      <div className="row pdf-export-row">
+        <label className="inline-label">
+          Khổ giấy xuất PDF
+          <select value={pageFormat} onChange={(e) => setPageFormat(e.target.value as PageFormatId)}>
+            {Object.entries(PAGE_FORMATS).map(([id, f]) => (
+              <option key={id} value={id}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" onClick={handleExportPdf} disabled={exporting}>
+          {exporting ? "Đang tạo PDF…" : `Xuất PDF (~${pageEstimate.total} trang)`}
+        </button>
+        <span className="hint" style={{ marginBottom: 0 }}>
+          Lưới {pageEstimate.cols} cột × {pageEstimate.rows} hàng — PDF dạng vector, zoom sâu vẫn nét.
+        </span>
+      </div>
+      {exportError && <p className="errors">{exportError}</p>}
+
       <div className="diagram-scroll">
         <svg ref={svgRef} />
       </div>

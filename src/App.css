@@ -205,6 +205,23 @@ td.actions button {
   vertical-align: middle;
 }
 
+.pdf-export-row {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.inline-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--text-h);
+}
+.inline-label select {
+  width: auto;
+}
+
 .diagram-scroll {
   overflow: auto;
   border: 1px solid var(--border);
