@@ -7,7 +7,8 @@ Công cụ sắp xếp danh sách bài viết của website thành sơ đồ **T
 - **Nhập từ CSV**: tải lên file CSV danh sách bài viết đã có sẵn logic cụm (cột `Title`, `URL`, `TopicCluster`, `Role`, `PillarOf`).
 - **Nhập tay**: thêm từng bài viết, chọn/gán vào một cụm Topic Cluster có sẵn hoặc tạo cụm mới, đánh dấu vai trò Pillar (trụ cột) hoặc Supporting (vệ tinh) và liên kết tới bài Pillar tương ứng.
 - **Danh sách bài viết**: xem, sửa, xóa bài viết theo từng cụm.
-- **Sơ đồ Topic Cluster**: mỗi cụm hiển thị dạng bong bóng tỏa tròn — bài Pillar ở trung tâm, các bài Supporting xoay quanh; tự động nối nét đứt giữa các cụm khi một bài viết vừa là vệ tinh ở cụm này vừa là trụ cột ở cụm khác. Bán kính vòng và cỡ bong bóng tự giãn/co theo số lượng bài trong cụm để không bị chồng lấn dù một cụm có vài chục bài.
+- **Sơ đồ Topic Cluster**: mỗi cụm hiển thị dạng bong bóng tỏa tròn — bài Pillar ở trung tâm, các bài Supporting xoay quanh. Bán kính vòng và cỡ bong bóng tự giãn/co theo số lượng bài trong cụm để không bị chồng lấn dù một cụm có vài chục bài.
+- **Nối nhiều cụm thành nhiều level**: một cụm có thể khai báo là "nhánh con" của một bài viết ở cụm khác (cột `PillarOf` trên chính dòng Pillar) — sơ đồ tự vẽ đường nối rõ ràng giữa 2 cụm. Lặp lại để nối bao nhiêu level tùy ý (không giới hạn 2 cấp), phù hợp cho cấu trúc content phân cấp sâu.
 - **Xuất PDF dạng vector nhiều trang**: dùng cho sơ đồ lớn (hàng nghìn bài viết). Vẽ trực tiếp bằng jsPDF (không qua ảnh raster) nên zoom sâu trong PDF chữ vẫn sắc nét; sơ đồ lớn được chia lưới nhiều trang theo khổ giấy chọn (A4/A3/A2/A1/A0 ngang, có viền chồng lấn để không cắt đứt bong bóng ở mép trang), kèm trang bìa dạng bản đồ lưới để biết trang nào ghép ở đâu. Font Roboto được nhúng sẵn để hiển thị đúng dấu tiếng Việt.
 - **Xuất / Nhập dữ liệu**: xuất CSV hoặc JSON (sao lưu đầy đủ), nhập lại từ file JSON đã sao lưu. Dữ liệu được lưu tự động trong `localStorage` của trình duyệt.
 
@@ -19,9 +20,11 @@ Công cụ sắp xếp danh sách bài viết của website thành sơ đồ **T
 | `URL` | Không | Đường dẫn bài viết |
 | `TopicCluster` | Có | Tên cụm chủ đề bài viết thuộc về |
 | `Role` | Không | `Pillar` (trụ cột) hoặc `Supporting` (vệ tinh, mặc định) |
-| `PillarOf` | Không | Tiêu đề bài Pillar mà bài Supporting này liên kết tới (nếu cụm chỉ có 1 Pillar, có thể bỏ trống — hệ thống tự liên kết) |
+| `PillarOf` | Không | Bài viết mà dòng này liên kết tới (tìm theo Title, trên toàn bộ dữ liệu chứ không giới hạn trong cụm) |
 
-Có thể tải file CSV mẫu ngay trong tab "Nhập từ CSV" của ứng dụng.
+**Cách nối nhiều level:** `PillarOf` không chỉ dùng cho bài Supporting — khai báo nó ngay trên dòng `Role = Pillar` để trỏ tới 1 bài viết ở **cụm khác**, biến cả cụm đó thành nhánh con của bài viết được trỏ tới. Hai tiêu đề không cần trùng nhau. Lặp lại qua nhiều cụm để tạo chuỗi 3, 4, 5... level. Nếu bỏ trống ở dòng Pillar, cụm đó là gốc (level cao nhất).
+
+Có thể tải file CSV mẫu ngay trong tab "Nhập từ CSV" của ứng dụng (file mẫu có sẵn ví dụ nối 3 level).
 
 ## Định hướng tiếp theo
 

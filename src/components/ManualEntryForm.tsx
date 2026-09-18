@@ -16,11 +16,19 @@ export function ManualEntryForm() {
   const [form, setForm] = useState(emptyForm);
   const [justAdded, setJustAdded] = useState<string | null>(null);
 
-  const pillarOptions = useMemo(() => {
-    const cluster = clusters.find((c) => c.name.trim().toLowerCase() === form.clusterName.trim().toLowerCase());
-    if (!cluster) return [];
-    return articles.filter((a) => a.clusterId === cluster.id && a.role === "pillar");
-  }, [clusters, articles, form.clusterName]);
+  const currentCluster = useMemo(
+    () => clusters.find((c) => c.name.trim().toLowerCase() === form.clusterName.trim().toLowerCase()),
+    [clusters, form.clusterName]
+  );
+
+  // Supporting: suggest Pillars within this same cluster (the common case). Pillar: suggest articles
+  // in OTHER clusters — picking one chains this whole cluster onto that cluster as a deeper level.
+  const targetOptions = useMemo(() => {
+    if (form.role === "pillar") {
+      return currentCluster ? articles.filter((a) => a.clusterId !== currentCluster.id) : articles;
+    }
+    return currentCluster ? articles.filter((a) => a.clusterId === currentCluster.id && a.role === "pillar") : [];
+  }, [articles, currentCluster, form.role]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -30,7 +38,7 @@ export function ManualEntryForm() {
       url: form.url,
       clusterName: form.clusterName,
       role: form.role,
-      pillarOf: form.role === "supporting" ? form.pillarOf : undefined,
+      pillarOf: form.pillarOf || undefined,
       notes: form.notes,
     });
     setJustAdded(created.title);
@@ -42,7 +50,8 @@ export function ManualEntryForm() {
       <h2>Nhập tay từng bài viết</h2>
       <p className="hint">
         Nhập bài viết và cụm Topic Cluster mà nó thuộc về. Nếu cụm chưa tồn tại, hệ thống sẽ tự tạo mới. Mỗi cụm nên
-        có 1 bài Pillar (trụ cột) và nhiều bài Supporting (vệ tinh) liên kết về Pillar đó.
+        có 1 bài Pillar (trụ cột) và nhiều bài Supporting (vệ tinh) liên kết về Pillar đó. Muốn nối nhiều cụm thành
+        nhiều level (cụm này là nhánh con của cụm khác), khai báo ở ô "nhánh con của" khi thêm bài Pillar.
       </p>
       <form onSubmit={handleSubmit} className="form-grid">
         <label>
@@ -91,22 +100,28 @@ export function ManualEntryForm() {
           </select>
         </label>
 
-        {form.role === "supporting" && (
-          <label>
-            Liên kết tới bài Pillar nào
-            <input
-              list="pillar-options"
-              value={form.pillarOf}
-              onChange={(e) => setForm((f) => ({ ...f, pillarOf: e.target.value }))}
-              placeholder={pillarOptions.length ? "Chọn bài Pillar trong cụm này" : "Chưa có Pillar — để trống cũng được"}
-            />
-            <datalist id="pillar-options">
-              {pillarOptions.map((p) => (
-                <option key={p.id} value={p.title} />
-              ))}
-            </datalist>
-          </label>
-        )}
+        <label>
+          {form.role === "pillar"
+            ? "Cụm này là nhánh con của bài viết nào? (tùy chọn — ở cụm khác, để nối nhiều level)"
+            : "Liên kết tới bài Pillar nào"}
+          <input
+            list="target-options"
+            value={form.pillarOf}
+            onChange={(e) => setForm((f) => ({ ...f, pillarOf: e.target.value }))}
+            placeholder={
+              form.role === "pillar"
+                ? "Để trống nếu đây là cụm gốc (level cao nhất)"
+                : targetOptions.length
+                  ? "Chọn bài Pillar trong cụm này"
+                  : "Chưa có Pillar — để trống cũng được"
+            }
+          />
+          <datalist id="target-options">
+            {targetOptions.map((a) => (
+              <option key={a.id} value={a.title} />
+            ))}
+          </datalist>
+        </label>
 
         <label className="full-width">
           Ghi chú

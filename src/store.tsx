@@ -38,7 +38,12 @@ export interface AddArticleInput {
   url: string;
   clusterName: string;
   role: ArticleRole;
-  /** title of the pillar article this supports, within the same cluster (ignored for pillar role) */
+  /**
+   * Title of the article this one hangs off of, searched across ALL clusters (not just this one).
+   * For a Supporting article this is normally a Pillar in the same cluster (auto-linked if omitted
+   * and the cluster has exactly one Pillar). For a Pillar article, setting this chains its whole
+   * cluster onto a node in another cluster — the mechanism used to build multi-level topic maps.
+   */
   pillarOf?: string;
   notes?: string;
 }
@@ -87,15 +92,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       commit((prev) => {
         const [cluster, clusters] = getOrCreateCluster(prev.clusters, input.clusterName);
         let linksTo: string | null = null;
-        if (input.role === "supporting") {
+        if (input.pillarOf) {
+          const pillarKey = normalizeKey(input.pillarOf);
+          linksTo = prev.articles.find((a) => normalizeKey(a.title) === pillarKey)?.id ?? null;
+        } else if (input.role === "supporting") {
           const clusterArticles = prev.articles.filter((a) => a.clusterId === cluster.id);
-          if (input.pillarOf) {
-            const pillarKey = normalizeKey(input.pillarOf);
-            linksTo = clusterArticles.find((a) => normalizeKey(a.title) === pillarKey)?.id ?? null;
-          } else {
-            const pillars = clusterArticles.filter((a) => a.role === "pillar");
-            if (pillars.length === 1) linksTo = pillars[0].id;
-          }
+          const pillars = clusterArticles.filter((a) => a.role === "pillar");
+          if (pillars.length === 1) linksTo = pillars[0].id;
         }
         const now = new Date().toISOString();
         const article: Article = {
@@ -131,13 +134,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         let linksTo = target.linksTo;
         const role = patch.role ?? target.role;
-        if (role === "pillar") {
-          linksTo = null;
-        } else if (patch.pillarOf !== undefined) {
+        if (patch.pillarOf !== undefined) {
           const pillarKey = normalizeKey(patch.pillarOf);
-          linksTo = pillarKey
-            ? prev.articles.find((a) => a.clusterId === clusterId && normalizeKey(a.title) === pillarKey)?.id ?? null
-            : null;
+          linksTo = pillarKey ? prev.articles.find((a) => a.id !== id && normalizeKey(a.title) === pillarKey)?.id ?? null : null;
         }
         const articles = prev.articles.map((a) =>
           a.id === id
@@ -209,20 +208,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           importedArticles++;
         }
 
-        // pass 2: resolve supporting -> pillar links now that all rows exist
+        // pass 2: resolve PillarOf links now that all rows exist. Searches across ALL clusters, so a
+        // Pillar row's PillarOf chains its whole cluster onto a node elsewhere (multi-level topic maps),
+        // while a Supporting row's PillarOf (or the same-cluster auto-link fallback) works as before.
         articles = articles.map((a) => {
-          if (a.role !== "supporting" || a.linksTo) return a;
+          if (a.linksTo) return a;
           const row = rows.find(
             (r) => normalizeKey(r.title) === normalizeKey(a.title) && normalizeKey(r.cluster) === normalizeKey(clusters.find((c) => c.id === a.clusterId)?.name ?? "")
           );
-          const clusterArticles = articles.filter((x) => x.clusterId === a.clusterId);
           if (row?.pillarOf) {
             const pillarKey = normalizeKey(row.pillarOf);
-            const match = clusterArticles.find((x) => normalizeKey(x.title) === pillarKey);
+            const match = articles.find((x) => x.id !== a.id && normalizeKey(x.title) === pillarKey);
             if (match) return { ...a, linksTo: match.id };
           }
-          const pillars = clusterArticles.filter((x) => x.role === "pillar");
-          if (pillars.length === 1) return { ...a, linksTo: pillars[0].id };
+          if (a.role === "supporting") {
+            const pillars = articles.filter((x) => x.clusterId === a.clusterId && x.role === "pillar");
+            if (pillars.length === 1) return { ...a, linksTo: pillars[0].id };
+          }
           return a;
         });
 

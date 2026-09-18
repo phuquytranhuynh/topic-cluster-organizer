@@ -4,11 +4,15 @@ import { useStore } from "../store";
 import type { ImportResult } from "../types";
 
 const SAMPLE_CSV = `Title,URL,TopicCluster,Role,PillarOf
-Hướng dẫn SEO Onpage toàn tập,/blog/seo-onpage,SEO Onpage,Pillar,
-Cách tối ưu thẻ title chuẩn SEO,/blog/toi-uu-title,SEO Onpage,Supporting,Hướng dẫn SEO Onpage toàn tập
-Internal link là gì,/blog/internal-link,SEO Onpage,Supporting,Hướng dẫn SEO Onpage toàn tập
-Content Marketing cho người mới bắt đầu,/blog/content-marketing,Content Marketing,Pillar,
-Cách viết content chuẩn SEO,/blog/viet-content-seo,Content Marketing,Supporting,Content Marketing cho người mới bắt đầu
+Marketing tổng quan là gì,/blog/marketing-tong-quan,Marketing tổng quan,Pillar,
+4P trong Marketing,/blog/4p-marketing,Marketing tổng quan,Supporting,Marketing tổng quan là gì
+Digital Marketing,/blog/digital-marketing,Marketing tổng quan,Supporting,Marketing tổng quan là gì
+Cẩm nang Digital Marketing từ A-Z,/blog/cam-nang-digital-marketing,Digital Marketing chuyên sâu,Pillar,Digital Marketing
+SEO là gì,/blog/seo-la-gi,Digital Marketing chuyên sâu,Supporting,Cẩm nang Digital Marketing từ A-Z
+Email Marketing là gì,/blog/email-marketing-la-gi,Digital Marketing chuyên sâu,Supporting,Cẩm nang Digital Marketing từ A-Z
+Toàn tập SEO từ A-Z,/blog/toan-tap-seo,SEO chuyên sâu,Pillar,SEO là gì
+SEO Onpage,/blog/seo-onpage,SEO chuyên sâu,Supporting,Toàn tập SEO từ A-Z
+SEO Offpage,/blog/seo-offpage,SEO chuyên sâu,Supporting,Toàn tập SEO từ A-Z
 `;
 
 export function CsvImport() {
@@ -51,7 +55,13 @@ export function CsvImport() {
       <h2>Nhập từ file CSV</h2>
       <p className="hint">
         File CSV cần các cột: <code>Title</code>, <code>URL</code>, <code>TopicCluster</code>, và tùy chọn{" "}
-        <code>Role</code> (Pillar/Supporting) và <code>PillarOf</code> (tên bài Pillar mà bài Supporting liên kết tới).
+        <code>Role</code> (Pillar/Supporting) và <code>PillarOf</code> (bài viết mà dòng này liên kết tới).
+      </p>
+      <p className="hint">
+        <strong>Nối nhiều cụm thành nhiều level:</strong> khai báo <code>PillarOf</code> ngay trên dòng{" "}
+        <code>Role = Pillar</code>, trỏ tới tên 1 bài viết ở cụm khác (không cần trùng tên) — cụm đó sẽ trở thành
+        nhánh con của bài viết được trỏ tới. Lặp lại để nối bao nhiêu level cũng được (xem file mẫu: 3 cụm nối thành
+        3 level).
       </p>
       <div className="row">
         <input

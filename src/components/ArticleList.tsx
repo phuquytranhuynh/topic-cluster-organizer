@@ -12,7 +12,7 @@ function EditRow({ article, onDone }: { article: Article; onDone: () => void }) 
   const [pillarOf, setPillarOf] = useState(pillar?.title ?? "");
 
   function save() {
-    updateArticle(article.id, { title, url, role, pillarOf: role === "supporting" ? pillarOf : "" });
+    updateArticle(article.id, { title, url, role, pillarOf });
     onDone();
   }
 
@@ -32,11 +32,11 @@ function EditRow({ article, onDone }: { article: Article; onDone: () => void }) 
         </select>
       </td>
       <td>
-        {role === "supporting" ? (
-          <input value={pillarOf} onChange={(e) => setPillarOf(e.target.value)} placeholder="Tên bài Pillar" />
-        ) : (
-          "—"
-        )}
+        <input
+          value={pillarOf}
+          onChange={(e) => setPillarOf(e.target.value)}
+          placeholder={role === "pillar" ? "Nhánh con của (cụm khác)" : "Tên bài Pillar"}
+        />
       </td>
       <td className="actions">
         <button type="button" onClick={save}>

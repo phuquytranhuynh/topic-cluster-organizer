@@ -1,4 +1,3 @@
-import { normalizeKey } from "./csv";
 import type { Article, TopicCluster } from "./types";
 
 export const ROOT_R = 70;
@@ -28,6 +27,8 @@ export interface RadialNode {
   isRoot: boolean;
   fontSize: number;
   maxChars: number;
+  /** id of the article this node's PillarOf points to (may live in another cluster) — drives cross-cluster links. */
+  linksTo: string | null;
 }
 
 export interface ClusterLayout {
@@ -88,6 +89,7 @@ function buildSingleCluster(
     isRoot: true,
     fontSize: 15,
     maxChars: 12,
+    linksTo: pillar?.linksTo ?? null,
   };
 
   const fontSize = Math.max(8, Math.round((13 * childR) / CHILD_R_BASE));
@@ -106,6 +108,7 @@ function buildSingleCluster(
       isRoot: false,
       fontSize,
       maxChars,
+      linksTo: a.linksTo,
     };
   });
 
@@ -153,17 +156,26 @@ export function layoutDiagram(clusters: TopicCluster[], articles: Article[]): Di
   return { layouts, width: maxRowWidth, height: cursorY + rowHeight };
 }
 
+/**
+ * Draws a line between clusters whenever a node explicitly declares (via PillarOf) that it hangs
+ * off a node in ANOTHER cluster — this is how a Pillar's whole cluster chains onto a parent cluster,
+ * letting you build maps with as many levels as you have clusters willing to link up.
+ */
 export function buildCrossLinks(layouts: ClusterLayout[]): CrossLink[] {
+  const nodeIndex = new Map<string, { node: RadialNode; clusterId: string; clusterColor: string }>();
+  for (const layout of layouts) {
+    for (const node of [layout.root, ...layout.children]) {
+      nodeIndex.set(node.id, { node, clusterId: layout.cluster.id, clusterColor: layout.colors.root });
+    }
+  }
+
   const links: CrossLink[] = [];
   for (const layout of layouts) {
-    const rootKey = normalizeKey(layout.root.title);
-    for (const other of layouts) {
-      if (other === layout) continue;
-      for (const child of other.children) {
-        if (normalizeKey(child.title) === rootKey) {
-          links.push({ from: child, to: layout.root, color: layout.colors.root });
-        }
-      }
+    for (const node of [layout.root, ...layout.children]) {
+      if (!node.linksTo) continue;
+      const target = nodeIndex.get(node.linksTo);
+      if (!target || target.clusterId === layout.cluster.id) continue;
+      links.push({ from: node, to: target.node, color: target.clusterColor });
     }
   }
   return links;
