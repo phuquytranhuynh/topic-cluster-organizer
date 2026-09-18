@@ -12,7 +12,7 @@ import {
   type RadialNode,
 } from "../diagramLayout";
 import { clearPositions, loadPositions, savePositions, type PositionOverrides } from "../diagramPositions";
-import { PAGE_FORMATS, estimatePageGrid, type PageFormatId } from "../pdf/pageFormats";
+import { FIT_OPTION, PAGE_FORMATS, estimatePageGrid, type PageFormatId } from "../pdf/pageFormats";
 import { useStore } from "../store";
 
 const ZOOM_MIN = 0.05;
@@ -298,6 +298,7 @@ export function ClusterDiagram() {
         <label className="inline-label">
           Khổ giấy xuất PDF
           <select value={pageFormat} onChange={(e) => setPageFormat(e.target.value as PageFormatId)}>
+            <option value={FIT_OPTION.id}>{FIT_OPTION.label}</option>
             {Object.entries(PAGE_FORMATS).map(([id, f]) => (
               <option key={id} value={id}>
                 {f.label}
@@ -306,7 +307,11 @@ export function ClusterDiagram() {
           </select>
         </label>
         <button type="button" onClick={handleExportPdf} disabled={exporting}>
-          {exporting ? "Đang tạo PDF…" : `Xuất PDF (~${pageEstimate.total} trang)`}
+          {exporting
+            ? "Đang tạo PDF…"
+            : pageFormat === "fit"
+              ? "Xuất PDF (1 trang)"
+              : `Xuất PDF (~${pageEstimate.total} trang)`}
         </button>
         {hasOverrides && (
           <button type="button" className="secondary" onClick={handleResetPositions}>
@@ -314,8 +319,11 @@ export function ClusterDiagram() {
           </button>
         )}
         <span className="hint" style={{ marginBottom: 0 }}>
-          Lưới {pageEstimate.cols} cột × {pageEstimate.rows} hàng — PDF theo đúng vị trí bạn đã sắp xếp, dạng vector
-          nên zoom sâu vẫn nét.
+          {pageFormat === "fit"
+            ? pageEstimate.scale < 1
+              ? `Sơ đồ lớn hơn khổ trang PDF tối đa nên tự thu nhỏ còn ${Math.round(pageEstimate.scale * 100)}% — vẫn là vector, zoom trên máy tính vẫn nét, chỉ in giấy sẽ khó đọc hơn.`
+              : "Toàn bộ sơ đồ nằm gọn 1 trang, đúng kích thước gốc — dạng vector nên zoom sâu vẫn nét."
+            : `Lưới ${pageEstimate.cols} cột × ${pageEstimate.rows} hàng — PDF theo đúng vị trí bạn đã sắp xếp, dạng vector nên zoom sâu vẫn nét.`}
         </span>
       </div>
       {exportError && <p className="errors">{exportError}</p>}

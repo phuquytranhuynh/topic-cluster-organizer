@@ -18,23 +18,29 @@ function segmentIntersectsTile(
   y2: number,
   offsetX: number,
   offsetY: number,
-  pageW: number,
-  pageH: number,
+  worldPageW: number,
+  worldPageH: number,
   pad = 10
 ): boolean {
   const minX = Math.min(x1, x2) - pad;
   const maxX = Math.max(x1, x2) + pad;
   const minY = Math.min(y1, y2) - pad;
   const maxY = Math.max(y1, y2) + pad;
-  return maxX >= offsetX && minX <= offsetX + pageW && maxY >= offsetY && minY <= offsetY + pageH;
+  return maxX >= offsetX && minX <= offsetX + worldPageW && maxY >= offsetY && minY <= offsetY + worldPageH;
 }
 
-function nodeIntersectsTile(node: RadialNode, offsetX: number, offsetY: number, pageW: number, pageH: number): boolean {
+function nodeIntersectsTile(
+  node: RadialNode,
+  offsetX: number,
+  offsetY: number,
+  worldPageW: number,
+  worldPageH: number
+): boolean {
   return (
     node.cx + NODE_PAD >= offsetX &&
-    node.cx - NODE_PAD <= offsetX + pageW &&
+    node.cx - NODE_PAD <= offsetX + worldPageW &&
     node.cy + NODE_PAD >= offsetY &&
-    node.cy - NODE_PAD <= offsetY + pageH
+    node.cy - NODE_PAD <= offsetY + worldPageH
   );
 }
 
@@ -104,30 +110,37 @@ function drawTile(
     offsetY: number;
     pageW: number;
     pageH: number;
+    scale: number;
     pageIndex: number;
     totalPages: number;
     row: number;
     col: number;
+    showPageLabel: boolean;
   }
 ) {
-  const { layouts, crossLinks, offsetX, offsetY, pageW, pageH, pageIndex, totalPages, row, col } = opts;
-  const tx = (x: number) => x - offsetX;
-  const ty = (y: number) => y - offsetY;
+  const { layouts, crossLinks, offsetX, offsetY, pageW, pageH, scale, pageIndex, totalPages, row, col, showPageLabel } =
+    opts;
+  const worldPageW = pageW / scale;
+  const worldPageH = pageH / scale;
+  const tx = (x: number) => (x - offsetX) * scale;
+  const ty = (y: number) => (y - offsetY) * scale;
 
   for (const layout of layouts) {
     const [r, g, b] = hexToRgb(layout.colors.root);
     doc.setDrawColor(r, g, b);
-    doc.setLineWidth(2);
+    doc.setLineWidth(Math.max(0.4, 2 * scale));
     for (const child of layout.children) {
-      if (segmentIntersectsTile(layout.root.cx, layout.root.cy, child.cx, child.cy, offsetX, offsetY, pageW, pageH)) {
+      if (
+        segmentIntersectsTile(layout.root.cx, layout.root.cy, child.cx, child.cy, offsetX, offsetY, worldPageW, worldPageH)
+      ) {
         doc.line(tx(layout.root.cx), ty(layout.root.cy), tx(child.cx), ty(child.cy));
       }
     }
   }
 
-  doc.setLineDashPattern([6, 4], 0);
+  doc.setLineDashPattern([Math.max(2, 6 * scale), Math.max(1.5, 4 * scale)], 0);
   for (const link of crossLinks) {
-    if (segmentIntersectsTile(link.from.cx, link.from.cy, link.to.cx, link.to.cy, offsetX, offsetY, pageW, pageH)) {
+    if (segmentIntersectsTile(link.from.cx, link.from.cy, link.to.cx, link.to.cy, offsetX, offsetY, worldPageW, worldPageH)) {
       const [r, g, b] = hexToRgb(link.color);
       doc.setDrawColor(r, g, b);
       doc.line(tx(link.from.cx), ty(link.from.cy), tx(link.to.cx), ty(link.to.cy));
@@ -137,15 +150,16 @@ function drawTile(
 
   const allNodes = layouts.flatMap((l) => [l.root, ...l.children]);
   for (const node of allNodes) {
-    if (!nodeIntersectsTile(node, offsetX, offsetY, pageW, pageH)) continue;
+    if (!nodeIntersectsTile(node, offsetX, offsetY, worldPageW, worldPageH)) continue;
     const [r, g, b] = hexToRgb(node.fill);
     doc.setFillColor(r, g, b);
-    doc.circle(tx(node.cx), ty(node.cy), node.r, "F");
+    doc.circle(tx(node.cx), ty(node.cy), node.r * scale, "F");
 
+    const fontSize = Math.max(3, node.fontSize * scale);
     const lines = wrapLabel(node.title, node.maxChars);
-    const lineHeight = node.fontSize * 1.15;
+    const lineHeight = fontSize * 1.15;
     doc.setFont(FONT_NAME, "bold");
-    doc.setFontSize(node.fontSize);
+    doc.setFontSize(fontSize);
     doc.setTextColor(255, 255, 255);
     const startY = ty(node.cy) - ((lines.length - 1) * lineHeight) / 2;
     lines.forEach((line, i) => {
@@ -153,10 +167,12 @@ function drawTile(
     });
   }
 
-  doc.setFont(FONT_NAME, "normal");
-  doc.setFontSize(9);
-  doc.setTextColor(148, 163, 184);
-  doc.text(`Trang ${pageIndex}/${totalPages} — Hàng ${row + 1}, Cột ${col + 1}`, 14, 18);
+  if (showPageLabel) {
+    doc.setFont(FONT_NAME, "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(148, 163, 184);
+    doc.text(`Trang ${pageIndex}/${totalPages} — Hàng ${row + 1}, Cột ${col + 1}`, 14, 18);
+  }
 }
 
 export interface ExportDiagramPdfOptions {
@@ -177,13 +193,16 @@ export async function exportDiagramToPdf(opts: ExportDiagramPdfOptions): Promise
   const doc = new jsPDF({ unit: "pt", format: [grid.pageW, grid.pageH], orientation: "landscape" });
   await registerVietnameseFont(doc);
 
-  drawCoverPage(doc, { grid, clusterCount: layouts.length, articleCount });
+  const singlePage = grid.total === 1;
+  if (!singlePage) {
+    drawCoverPage(doc, { grid, clusterCount: layouts.length, articleCount });
+  }
 
   let pageIndex = 0;
   for (let row = 0; row < grid.rows; row++) {
     for (let col = 0; col < grid.cols; col++) {
       pageIndex++;
-      doc.addPage([grid.pageW, grid.pageH], "landscape");
+      if (!singlePage) doc.addPage([grid.pageW, grid.pageH], "landscape");
       drawTile(doc, {
         layouts,
         crossLinks,
@@ -191,10 +210,12 @@ export async function exportDiagramToPdf(opts: ExportDiagramPdfOptions): Promise
         offsetY: bounds.minY + row * grid.stepY,
         pageW: grid.pageW,
         pageH: grid.pageH,
+        scale: grid.scale,
         pageIndex,
         totalPages: grid.total,
         row,
         col,
+        showPageLabel: !singlePage,
       });
     }
   }

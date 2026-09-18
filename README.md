@@ -13,7 +13,9 @@ Công cụ sắp xếp danh sách bài viết của website thành sơ đồ **T
 - **Nối nhiều cụm thành nhiều level**: một cụm có thể khai báo là "nhánh con" của một bài viết ở cụm khác (cột `PillarOf` trên chính dòng Pillar) — sơ đồ tự vẽ đường nối rõ ràng giữa 2 cụm. Lặp lại để nối bao nhiêu level tùy ý (không giới hạn 2 cấp), phù hợp cho cấu trúc content phân cấp sâu.
 - **Kéo thả để tự sắp xếp**: kéo bong bóng Pillar để di chuyển cả cụm (mọi bài Supporting đi theo); kéo bong bóng Supporting để chỉnh riêng nó. Đường nối luôn bám theo vị trí mới. Vị trí được lưu tự động (localStorage), có nút "Đặt lại vị trí" để quay về bố cục tự động, và PDF xuất ra sẽ theo đúng bố cục đã sắp xếp.
 - **Zoom / pan**: cuộn chuột hoặc chụm 2 ngón để zoom, kéo vùng nền trống để di chuyển khung nhìn; có nút phóng to/thu nhỏ/vừa màn hình ở góc sơ đồ.
-- **Xuất PDF dạng vector nhiều trang**: dùng cho sơ đồ lớn (hàng nghìn bài viết). Vẽ trực tiếp bằng jsPDF (không qua ảnh raster) nên zoom sâu trong PDF chữ vẫn sắc nét; sơ đồ lớn được chia lưới nhiều trang theo khổ giấy chọn (A4/A3/A2/A1/A0 ngang, có viền chồng lấn để không cắt đứt bong bóng ở mép trang), kèm trang bìa dạng bản đồ lưới để biết trang nào ghép ở đâu. Font Roboto được nhúng sẵn để hiển thị đúng dấu tiếng Việt.
+- **Xuất PDF dạng vector**: vẽ trực tiếp bằng jsPDF (không qua ảnh raster) nên zoom sâu trong PDF chữ vẫn sắc nét. Font Roboto được nhúng sẵn để hiển thị đúng dấu tiếng Việt. Hai chế độ:
+  - **Một trang duy nhất**: toàn bộ sơ đồ nằm gọn 1 trang PDF, đúng kích thước gốc. Nếu sơ đồ quá lớn vượt khổ trang tối đa mà trình đọc PDF hỗ trợ, hệ thống tự thu nhỏ tỉ lệ để vừa 1 trang (vẫn là vector, zoom trên máy tính vẫn nét — chỉ in giấy sẽ khó đọc hơn).
+  - **Chia nhiều trang theo khổ giấy** (A4/A3/A2/A1/A0 ngang): phù hợp khi cần in giấy khổ lớn (poster) cho sơ đồ có hàng nghìn bài viết — các trang có viền chồng lấn để không cắt đứt bong bóng ở mép, kèm trang bìa dạng bản đồ lưới để biết trang nào ghép ở đâu.
 - **Xuất / Nhập dữ liệu**: xuất CSV hoặc JSON (sao lưu đầy đủ), nhập lại từ file JSON đã sao lưu. Dữ liệu được lưu tự động trong `localStorage` của trình duyệt.
 
 ## Định dạng CSV
