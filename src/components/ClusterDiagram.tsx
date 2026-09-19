@@ -2,6 +2,7 @@ import * as d3 from "d3";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ColorPickerModal } from "./ColorPickerModal";
 import { DistanceAdjustModal } from "./DistanceAdjustModal";
+import { SpacingAdjustModal } from "./SpacingAdjustModal";
 import {
   applyPositionOverrides,
   buildCrossLinks,
@@ -52,6 +53,7 @@ export function ClusterDiagram() {
     referenceLabel: string;
     referenceDistance: number;
   } | null>(null);
+  const [spacingPicker, setSpacingPicker] = useState<{ clusterId: string; currentCount: number } | null>(null);
   overridesRef.current = overrides;
   clustersRef.current = clusters;
 
@@ -460,10 +462,34 @@ export function ClusterDiagram() {
   }
 
   /**
+   * Whatever is chained onto a bubble that just moved follows it — as one rigid unit, same as
+   * Ctrl+drag — so a branch attached further down doesn't get left behind at its old spot. Shared by
+   * every action that repositions a cluster's own Supporting bubbles (distance and spacing adjust).
+   */
+  function cascadeChainMoves(
+    updates: PositionOverrides,
+    movedAnchors: { nodeId: string; dx: number; dy: number }[],
+    ownClusterId: string
+  ) {
+    const shiftedClusters = new Set([ownClusterId]);
+    function cascade(nodeId: string, dx: number, dy: number) {
+      for (const childClusterId of clustersAnchoredAt.get(nodeId) ?? []) {
+        if (shiftedClusters.has(childClusterId)) continue;
+        shiftedClusters.add(childClusterId);
+        for (const node of collectChainNodes(childClusterId)) {
+          const current = nodeById.get(node.id);
+          if (!current) continue;
+          updates[node.id] = { x: current.cx + dx, y: current.cy + dy };
+        }
+      }
+    }
+    for (const { nodeId, dx, dy } of movedAnchors) cascade(nodeId, dx, dy);
+  }
+
+  /**
    * Rescales how far this cluster's own Supporting bubbles currently sit from its Pillar — each bubble
-   * keeps its current direction from the Pillar, only its distance changes — then shifts whatever is
-   * chained onto any bubble that moved, recursively and arbitrarily deep, by that same bubble's delta,
-   * so a whole downstream branch follows its anchor point instead of being left behind.
+   * keeps its current direction from the Pillar, only its distance changes — then cascades the move
+   * into whatever's chained onto a bubble that moved.
    */
   function applyDistanceScale(clusterId: string, scale: number) {
     const liveLayout = layoutByClusterId.get(clusterId);
@@ -485,25 +511,55 @@ export function ClusterDiagram() {
       if (dx !== 0 || dy !== 0) movedAnchors.push({ nodeId: child.id, dx, dy });
     }
 
-    // Whatever is chained onto a bubble that just moved follows it — as one rigid unit, same as
-    // Ctrl+drag — so a branch attached further down doesn't get left behind at its old spot.
-    const shiftedClusters = new Set([clusterId]);
-    function cascade(nodeId: string, dx: number, dy: number) {
-      for (const childClusterId of clustersAnchoredAt.get(nodeId) ?? []) {
-        if (shiftedClusters.has(childClusterId)) continue;
-        shiftedClusters.add(childClusterId);
-        for (const node of collectChainNodes(childClusterId)) {
-          const current = nodeById.get(node.id);
-          if (!current) continue;
-          updates[node.id] = { x: current.cx + dx, y: current.cy + dy };
-        }
-      }
-    }
-    for (const { nodeId, dx, dy } of movedAnchors) cascade(nodeId, dx, dy);
-
+    cascadeChainMoves(updates, movedAnchors, clusterId);
     pushUndo({ type: "position", prev: overrides });
     commitOverrides(updates);
     setDistancePicker(null);
+  }
+
+  function openSpacingPicker(clusterId: string) {
+    const liveLayout = layoutByClusterId.get(clusterId);
+    if (!liveLayout || liveLayout.children.length === 0) return;
+    setSpacingPicker({ clusterId, currentCount: liveLayout.children.length });
+    setContextMenu(null);
+  }
+
+  /**
+   * Redistributes this cluster's own Supporting bubbles evenly across `slotCount` angular positions
+   * around its Pillar (kept in their current rotational order), leaving unused arc as open space when
+   * slotCount exceeds the actual bubble count. Each bubble's current distance from the Pillar is kept
+   * — only its angle changes. Cascades into chained clusters same as distance-adjust.
+   */
+  function applySpacing(clusterId: string, slotCount: number) {
+    const liveLayout = layoutByClusterId.get(clusterId);
+    if (!liveLayout || liveLayout.children.length === 0) {
+      setSpacingPicker(null);
+      return;
+    }
+
+    const rootPos = { x: liveLayout.root.cx, y: liveLayout.root.cy };
+    const ordered = [...liveLayout.children].sort(
+      (a, b) => Math.atan2(a.cy - rootPos.y, a.cx - rootPos.x) - Math.atan2(b.cy - rootPos.y, b.cx - rootPos.x)
+    );
+
+    const updates: PositionOverrides = {};
+    const movedAnchors: { nodeId: string; dx: number; dy: number }[] = [];
+
+    ordered.forEach((child, i) => {
+      const dist = Math.hypot(child.cx - rootPos.x, child.cy - rootPos.y);
+      const angle = (i * (2 * Math.PI)) / slotCount - Math.PI / 2;
+      const newX = rootPos.x + dist * Math.cos(angle);
+      const newY = rootPos.y + dist * Math.sin(angle);
+      updates[child.id] = { x: newX, y: newY };
+      const dx = newX - child.cx;
+      const dy = newY - child.cy;
+      if (dx !== 0 || dy !== 0) movedAnchors.push({ nodeId: child.id, dx, dy });
+    });
+
+    cascadeChainMoves(updates, movedAnchors, clusterId);
+    pushUndo({ type: "position", prev: overrides });
+    commitOverrides(updates);
+    setSpacingPicker(null);
   }
 
   if (clusters.length === 0) {
@@ -528,8 +584,8 @@ export function ClusterDiagram() {
         <code>Ctrl</code> (hoặc <code>Cmd</code>) trong lúc kéo để di chuyển cả chuỗi — cụm đang kéo cùng mọi cụm nối
         chuỗi bên dưới nó — theo trỏ chuột. Cuộn chuột hoặc chụm 2 ngón để zoom, kéo nền trống để di chuyển khung
         nhìn. Chuột phải vào 1 bong bóng để đổi màu cho cả cụm; chuột phải vào 1 bong bóng Supporting để điều chỉnh
-        khoảng cách của mọi bong bóng Supporting khác trong cụm so với Pillar. Nhấn <code>Ctrl</code>+<code>Z</code>{" "}
-        (hoặc <code>Cmd</code>+<code>Z</code>) để hoàn tác,{" "}
+        khoảng cách tới Pillar hoặc khoảng trống (góc) giữa các bong bóng Supporting trong cụm. Nhấn{" "}
+        <code>Ctrl</code>+<code>Z</code> (hoặc <code>Cmd</code>+<code>Z</code>) để hoàn tác,{" "}
         <code>Ctrl</code>+<code>Shift</code>+<code>Z</code> để làm lại thao tác vừa hoàn tác.
       </p>
 
@@ -597,6 +653,11 @@ export function ClusterDiagram() {
                 Điều chỉnh khoảng cách…
               </button>
             )}
+            {nodeById.get(contextMenu.nodeId)?.isRoot === false && (
+              <button type="button" onClick={() => openSpacingPicker(contextMenu.clusterId)}>
+                Điều chỉnh khoảng trống…
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -616,6 +677,14 @@ export function ClusterDiagram() {
           referenceDistance={distancePicker.referenceDistance}
           onConfirm={(scale) => applyDistanceScale(distancePicker.clusterId, scale)}
           onCancel={() => setDistancePicker(null)}
+        />
+      )}
+
+      {spacingPicker && (
+        <SpacingAdjustModal
+          currentCount={spacingPicker.currentCount}
+          onConfirm={(slotCount) => applySpacing(spacingPicker.clusterId, slotCount)}
+          onCancel={() => setSpacingPicker(null)}
         />
       )}
     </section>
