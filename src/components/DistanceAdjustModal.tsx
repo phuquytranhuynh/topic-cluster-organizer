@@ -14,11 +14,12 @@ export function DistanceAdjustModal({
   onConfirm,
   onCancel,
 }: {
-  /** title of the bubble that was right-clicked, shown as the concrete reference for the ratio. */
+  /** title of the bubble that was right-clicked, shown as the concrete reference for the % input. */
   referenceLabel: string;
   /** its current on-screen distance (px) from its cluster's Pillar. */
   referenceDistance: number;
-  onConfirm: (scale: number) => void;
+  /** the single absolute distance (px) every bubble in the ring should end up at. */
+  onConfirm: (targetDistance: number) => void;
   onCancel: () => void;
 }) {
   const [percent, setPercent] = useState(100);
@@ -34,10 +35,11 @@ export function DistanceAdjustModal({
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>Điều chỉnh khoảng cách</h3>
         <p className="hint">
-          Tỉ lệ dưới đây được tính theo khoảng cách hiện tại giữa "{referenceLabel}" và bong bóng Pillar của nó
-          ({Math.round(referenceDistance)}px), rồi áp dụng cho mọi bong bóng Supporting khác trong cùng cụm — mỗi
-          bong bóng dịch ra xa/gần Pillar theo đúng hướng hiện tại của nó. Cụm nào nối chuỗi vào một bong bóng vừa
-          dịch chuyển cũng tự dịch chuyển theo. Cụm Pillar gốc và các cụm khác không đổi.
+          % dưới đây tính theo khoảng cách hiện tại của "{referenceLabel}" tới bong bóng Pillar (
+          {Math.round(referenceDistance)}px). Sau khi xác nhận, <strong>mọi bong bóng khác trong cùng vòng</strong>{" "}
+          — dù trước đó xa hơn hay gần hơn — đều được đặt về đúng khoảng cách tuyệt đối này tới Pillar (chỉ khoảng
+          cách đổi, hướng của từng bong bóng giữ nguyên). Cụm nào nối chuỗi vào một bong bóng vừa dịch chuyển cũng tự
+          dịch chuyển theo. Bong bóng Pillar và các cụm khác không đổi.
         </p>
 
         <label>
@@ -65,7 +67,7 @@ export function DistanceAdjustModal({
             <button type="button" className="secondary" onClick={onCancel}>
               Hủy
             </button>
-            <button type="button" onClick={() => onConfirm(percent / 100)}>
+            <button type="button" onClick={() => onConfirm(pxValue)}>
               Xác nhận
             </button>
           </div>

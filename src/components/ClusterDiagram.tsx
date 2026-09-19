@@ -552,14 +552,15 @@ export function ClusterDiagram() {
   }
 
   /**
-   * Rescales how far every peer in this cluster's ring currently sits from its Pillar — each peer
-   * keeps its current direction from the Pillar, only its distance changes.
+   * Sets every peer in this cluster's ring to the SAME absolute distance from its Pillar — whichever
+   * peer was longer or shorter before, all end up at exactly `targetDistance`. Each peer keeps its
+   * current direction from the Pillar; only the distance changes.
    */
-  function applyDistanceScale(clusterId: string, scale: number) {
-    const updates = applyRingTransform(clusterId, (node, rootPos) => ({
-      x: rootPos.x + (node.cx - rootPos.x) * scale,
-      y: rootPos.y + (node.cy - rootPos.y) * scale,
-    }));
+  function applyDistanceScale(clusterId: string, targetDistance: number) {
+    const updates = applyRingTransform(clusterId, (node, rootPos) => {
+      const angle = Math.atan2(node.cy - rootPos.y, node.cx - rootPos.x);
+      return { x: rootPos.x + targetDistance * Math.cos(angle), y: rootPos.y + targetDistance * Math.sin(angle) };
+    });
     setDistancePicker(null);
     if (!updates) return;
     pushUndo({ type: "position", prev: overrides });
@@ -719,7 +720,7 @@ export function ClusterDiagram() {
         <DistanceAdjustModal
           referenceLabel={distancePicker.referenceLabel}
           referenceDistance={distancePicker.referenceDistance}
-          onConfirm={(scale) => applyDistanceScale(distancePicker.clusterId, scale)}
+          onConfirm={(targetDistance) => applyDistanceScale(distancePicker.clusterId, targetDistance)}
           onCancel={() => setDistancePicker(null)}
         />
       )}
