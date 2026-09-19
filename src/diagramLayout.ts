@@ -149,7 +149,7 @@ interface ClusterMeta {
  * (its Pillar first, else whichever Supporting article declares it) has PillarOf pointing at a node
  * that lives in a different cluster. Clusters with no such link are standalone/root clusters.
  */
-function resolveParentClusterIds(articles: Article[]): Map<string, string> {
+export function resolveParentClusterIds(articles: Article[]): Map<string, string> {
   const clusterIdByArticleId = new Map<string, string>();
   for (const a of articles) clusterIdByArticleId.set(a.id, a.clusterId);
 

@@ -8,6 +8,7 @@ import {
   computeBounds,
   computeLabelLayout,
   layoutDiagram,
+  resolveParentClusterIds,
   type ClusterLayout,
   type DiagramLayout,
   type RadialNode,
@@ -43,6 +44,8 @@ export function ClusterDiagram() {
   const layouts = useMemo(() => applyPositionOverrides(baseLayouts, overrides), [baseLayouts, overrides]);
   const crossLinks = useMemo(() => buildCrossLinks(layouts), [layouts]);
   const bounds = useMemo(() => computeBounds(layouts), [layouts]);
+  // clusterId -> parent clusterId it's chained onto (PillarOf), for the Ctrl+drag "move whole chain" gesture.
+  const parentClusterOf = useMemo(() => resolveParentClusterIds(articles), [articles]);
 
   const pageEstimate = useMemo(
     () => estimatePageGrid(bounds.width, bounds.height, pageFormat),
@@ -115,11 +118,31 @@ export function ClusterDiagram() {
     // memoized RadialNode objects), so redraws stay driven purely by React state.
     const livePos = new Map<string, { x: number; y: number }>();
     const clusterByNodeId = new Map<string, ClusterLayout>();
+    const layoutByClusterId = new Map<string, ClusterLayout>();
     for (const layout of layouts) {
+      layoutByClusterId.set(layout.cluster.id, layout);
       for (const node of [layout.root, ...layout.children]) {
         livePos.set(node.id, { x: node.cx, y: node.cy });
         clusterByNodeId.set(node.id, layout);
       }
+    }
+
+    // clusterId -> ids of clusters chained directly onto it, for the Ctrl+drag "move whole chain" gesture.
+    const childClusterIds = new Map<string, string[]>();
+    for (const [childId, parentId] of parentClusterOf) {
+      const list = childClusterIds.get(parentId);
+      if (list) list.push(childId);
+      else childClusterIds.set(parentId, [childId]);
+    }
+    function collectChainNodes(clusterId: string, visited = new Set<string>()): RadialNode[] {
+      if (visited.has(clusterId)) return [];
+      visited.add(clusterId);
+      const layout = layoutByClusterId.get(clusterId);
+      const nodes = layout ? [layout.root, ...layout.children] : [];
+      for (const childId of childClusterIds.get(clusterId) ?? []) {
+        nodes.push(...collectChainNodes(childId, visited));
+      }
+      return nodes;
     }
 
     const linesByNodeId = new Map<string, { el: SVGLineElement; end: "from" | "to" }[]>();
@@ -242,29 +265,40 @@ export function ClusterDiagram() {
       }
     }
 
+    // Set once at the start of each drag gesture (single-pointer mouse/touch drag, so one gesture at
+    // a time) and reused for its "drag"/"end" ticks.
+    let dragMoveSet: RadialNode[] = [];
+
     const dragBehavior = d3
       .drag<SVGGElement, RadialNode>()
-      .on("start", function (event) {
+      // d3-drag's default filter ignores any gesture where ctrlKey is held — override it so
+      // Ctrl+drag (the "move the whole chain" gesture) can still start.
+      .filter((event) => !event.button)
+      .on("start", function (event, d) {
         // Keep the svg-level zoom/pan behavior from also treating this pointerdown as a pan gesture.
         event.sourceEvent?.stopPropagation();
         d3.select(this).raise().classed("dragging", true);
-      })
-      .on("drag", function (event, d) {
         const layout = clusterByNodeId.get(d.id);
-        const moving = d.isRoot && layout ? [layout.root, ...layout.children] : [d];
-        for (const node of moving) {
+        const ctrlHeld = Boolean(event.sourceEvent?.ctrlKey || event.sourceEvent?.metaKey);
+        if (ctrlHeld && layout) {
+          dragMoveSet = collectChainNodes(layout.cluster.id);
+        } else {
+          dragMoveSet = d.isRoot && layout ? [layout.root, ...layout.children] : [d];
+        }
+      })
+      .on("drag", function (event) {
+        for (const node of dragMoveSet) {
           const p = livePos.get(node.id)!;
           moveNode(node, p.x + event.dx, p.y + event.dy);
         }
       })
-      .on("end", function (_event, d) {
+      .on("end", function () {
         d3.select(this).classed("dragging", false);
-        const layout = clusterByNodeId.get(d.id);
-        const moved = d.isRoot && layout ? [layout.root, ...layout.children] : [d];
         const updates: PositionOverrides = {};
-        for (const node of moved) updates[node.id] = livePos.get(node.id)!;
+        for (const node of dragMoveSet) updates[node.id] = livePos.get(node.id)!;
         undoStackRef.current.push({ type: "position", prev: overrides });
         commitOverrides(updates);
+        dragMoveSet = [];
       });
 
     nodeGroups.call(dragBehavior);
@@ -302,7 +336,7 @@ export function ClusterDiagram() {
     } else {
       svg.call(zoomBehavior.transform, currentTransformRef.current);
     }
-  }, [layouts, crossLinks, bounds, baseLayouts]);
+  }, [layouts, crossLinks, bounds, baseLayouts, parentClusterOf]);
 
   function zoomBy(factor: number) {
     const svgEl = svgRef.current;
@@ -372,10 +406,11 @@ export function ClusterDiagram() {
         <span className="legend-dot" style={{ background: colorForClusterIndex(0).root }} /> Bài Pillar &nbsp;
         <span className="legend-dot" style={{ background: colorForClusterIndex(0).child }} /> Bài Supporting &nbsp; —
         mỗi cụm một tông màu riêng, không trùng với cụm khác. Đường nét đứt nối cụm này với bài viết mà nó khai báo là nhánh con (xem tab "Nhập tay"/CSV,
-        cột PillarOf). Kéo bong bóng Pillar để di chuyển cả cụm; kéo bong bóng Supporting để chỉnh riêng nó. Cuộn
-        chuột hoặc chụm 2 ngón để zoom, kéo nền trống để di chuyển khung nhìn. Chuột phải vào 1 bong bóng để đổi màu
-        cho cả cụm. Nhấn <code>Ctrl</code>+<code>Z</code> (hoặc <code>Cmd</code>+<code>Z</code>) để hoàn tác thao
-        tác kéo thả hoặc đổi màu gần nhất.
+        cột PillarOf). Kéo bong bóng Pillar để di chuyển cả cụm; kéo bong bóng Supporting để chỉnh riêng nó. Giữ{" "}
+        <code>Ctrl</code> (hoặc <code>Cmd</code>) trong lúc kéo để di chuyển cả chuỗi — cụm đang kéo cùng mọi cụm nối
+        chuỗi bên dưới nó — theo trỏ chuột. Cuộn chuột hoặc chụm 2 ngón để zoom, kéo nền trống để di chuyển khung
+        nhìn. Chuột phải vào 1 bong bóng để đổi màu cho cả cụm. Nhấn <code>Ctrl</code>+<code>Z</code> (hoặc{" "}
+        <code>Cmd</code>+<code>Z</code>) để hoàn tác thao tác kéo thả hoặc đổi màu gần nhất.
       </p>
 
       <div className="row pdf-export-row">
