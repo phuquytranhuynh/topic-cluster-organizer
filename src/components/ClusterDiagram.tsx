@@ -90,6 +90,12 @@ export function ClusterDiagram() {
     for (const l of layouts) for (const n of [l.root, ...l.children]) map.set(n.id, n);
     return map;
   }, [layouts]);
+  // nodeId -> id of the cluster it belongs to (as its root OR as one of its Supporting children).
+  const clusterIdByNodeId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const l of layouts) for (const n of [l.root, ...l.children]) map.set(n.id, l.cluster.id);
+    return map;
+  }, [layouts]);
 
   function collectChainNodes(clusterId: string, visited = new Set<string>()): RadialNode[] {
     if (visited.has(clusterId)) return [];
@@ -100,6 +106,38 @@ export function ClusterDiagram() {
       nodes.push(...collectChainNodes(childId, visited));
     }
     return nodes;
+  }
+
+  /**
+   * A cluster's "ring" for distance/spacing purposes is its own Supporting bubbles PLUS the Pillar
+   * bubble of every cluster chained directly onto it (anywhere within it) — a chained cluster's Pillar
+   * reads visually as "one of this cluster's satellites" even though it's the root of its own cluster.
+   */
+  function getRingPeers(clusterId: string): { node: RadialNode; ownClusterId: string | null }[] {
+    const liveLayout = layoutByClusterId.get(clusterId);
+    if (!liveLayout) return [];
+    const peers: { node: RadialNode; ownClusterId: string | null }[] = liveLayout.children.map((node) => ({
+      node,
+      ownClusterId: null,
+    }));
+    for (const childClusterId of childClusterIds.get(clusterId) ?? []) {
+      const childLayout = layoutByClusterId.get(childClusterId);
+      if (childLayout) peers.push({ node: childLayout.root, ownClusterId: childClusterId });
+    }
+    return peers;
+  }
+
+  /**
+   * Which cluster's ring a right-clicked bubble belongs to, for distance/spacing purposes: its own
+   * cluster if it's a Supporting bubble, or the PARENT cluster if it's the Pillar of a chained cluster
+   * (null if it's a Pillar with no parent — a standalone/root cluster has no ring to be a member of).
+   */
+  function targetClusterForNode(nodeId: string): string | null {
+    const node = nodeById.get(nodeId);
+    const ownClusterId = clusterIdByNodeId.get(nodeId);
+    if (!node || !ownClusterId) return null;
+    if (!node.isRoot) return ownClusterId;
+    return chainLinks.get(ownClusterId)?.parentClusterId ?? null;
   }
 
   const pageEstimate = useMemo(
@@ -452,114 +490,120 @@ export function ClusterDiagram() {
     setColorPicker(null);
   }
 
-  function openDistancePicker(clusterId: string, nodeId: string) {
-    const liveLayout = layoutByClusterId.get(clusterId);
+  function openDistancePicker(nodeId: string) {
+    const clusterId = targetClusterForNode(nodeId);
+    const targetLayout = clusterId ? layoutByClusterId.get(clusterId) : null;
     const node = nodeById.get(nodeId);
-    if (!liveLayout || !node) return;
-    const referenceDistance = Math.hypot(node.cx - liveLayout.root.cx, node.cy - liveLayout.root.cy);
+    if (!clusterId || !targetLayout || !node) return;
+    const referenceDistance = Math.hypot(node.cx - targetLayout.root.cx, node.cy - targetLayout.root.cy);
     setDistancePicker({ clusterId, referenceLabel: node.title, referenceDistance });
     setContextMenu(null);
   }
 
   /**
-   * Whatever is chained onto a bubble that just moved follows it — as one rigid unit, same as
-   * Ctrl+drag — so a branch attached further down doesn't get left behind at its old spot. Shared by
-   * every action that repositions a cluster's own Supporting bubbles (distance and spacing adjust).
+   * Moves every peer in `clusterId`'s ring (its own Supporting bubbles, plus the Pillar bubble of any
+   * cluster chained directly onto it — see {@link getRingPeers}) to the position `place` computes from
+   * its current position and the ring's root. A peer that is itself a chained cluster's Pillar carries
+   * its whole subtree along, rigidly, by the same delta (own children plus anything chained further
+   * below, however deep); a genuine Supporting peer instead cascades into whatever's chained onto that
+   * specific bubble — same as Ctrl+drag's "move the whole chain" gesture, just per-peer instead of
+   * one uniform delta for the whole gesture.
    */
-  function cascadeChainMoves(
-    updates: PositionOverrides,
-    movedAnchors: { nodeId: string; dx: number; dy: number }[],
-    ownClusterId: string
-  ) {
-    const shiftedClusters = new Set([ownClusterId]);
-    function cascade(nodeId: string, dx: number, dy: number) {
-      for (const childClusterId of clustersAnchoredAt.get(nodeId) ?? []) {
-        if (shiftedClusters.has(childClusterId)) continue;
-        shiftedClusters.add(childClusterId);
-        for (const node of collectChainNodes(childClusterId)) {
-          const current = nodeById.get(node.id);
-          if (!current) continue;
-          updates[node.id] = { x: current.cx + dx, y: current.cy + dy };
-        }
-      }
-    }
-    for (const { nodeId, dx, dy } of movedAnchors) cascade(nodeId, dx, dy);
-  }
-
-  /**
-   * Rescales how far this cluster's own Supporting bubbles currently sit from its Pillar — each bubble
-   * keeps its current direction from the Pillar, only its distance changes — then cascades the move
-   * into whatever's chained onto a bubble that moved.
-   */
-  function applyDistanceScale(clusterId: string, scale: number) {
+  function applyRingTransform(
+    clusterId: string,
+    place: (node: RadialNode, rootPos: { x: number; y: number }) => { x: number; y: number }
+  ): PositionOverrides | null {
     const liveLayout = layoutByClusterId.get(clusterId);
-    if (!liveLayout || liveLayout.children.length === 0) {
-      setDistancePicker(null);
-      return;
-    }
+    const peers = getRingPeers(clusterId);
+    if (!liveLayout || peers.length === 0) return null;
 
     const rootPos = { x: liveLayout.root.cx, y: liveLayout.root.cy };
     const updates: PositionOverrides = {};
-    const movedAnchors: { nodeId: string; dx: number; dy: number }[] = [];
+    const shiftedClusters = new Set([clusterId]);
 
-    for (const child of liveLayout.children) {
-      const newX = rootPos.x + (child.cx - rootPos.x) * scale;
-      const newY = rootPos.y + (child.cy - rootPos.y) * scale;
-      updates[child.id] = { x: newX, y: newY };
-      const dx = newX - child.cx;
-      const dy = newY - child.cy;
-      if (dx !== 0 || dy !== 0) movedAnchors.push({ nodeId: child.id, dx, dy });
+    for (const { node, ownClusterId } of peers) {
+      const { x: newX, y: newY } = place(node, rootPos);
+      updates[node.id] = { x: newX, y: newY };
+      const dx = newX - node.cx;
+      const dy = newY - node.cy;
+      if (dx === 0 && dy === 0) continue;
+
+      if (ownClusterId) {
+        // This peer is the Pillar of a chained cluster — its own children, and anything chained
+        // beneath it at any depth, move with it as one rigid unit.
+        shiftedClusters.add(ownClusterId);
+        for (const chainNode of collectChainNodes(ownClusterId)) {
+          if (chainNode.id === node.id) continue;
+          const current = nodeById.get(chainNode.id);
+          if (current) updates[chainNode.id] = { x: current.cx + dx, y: current.cy + dy };
+        }
+      } else {
+        for (const childClusterId of clustersAnchoredAt.get(node.id) ?? []) {
+          if (shiftedClusters.has(childClusterId)) continue;
+          shiftedClusters.add(childClusterId);
+          for (const chainNode of collectChainNodes(childClusterId)) {
+            const current = nodeById.get(chainNode.id);
+            if (current) updates[chainNode.id] = { x: current.cx + dx, y: current.cy + dy };
+          }
+        }
+      }
     }
-
-    cascadeChainMoves(updates, movedAnchors, clusterId);
-    pushUndo({ type: "position", prev: overrides });
-    commitOverrides(updates);
-    setDistancePicker(null);
+    return updates;
   }
 
-  function openSpacingPicker(clusterId: string) {
-    const liveLayout = layoutByClusterId.get(clusterId);
-    if (!liveLayout || liveLayout.children.length === 0) return;
-    setSpacingPicker({ clusterId, currentCount: liveLayout.children.length });
+  /**
+   * Rescales how far every peer in this cluster's ring currently sits from its Pillar — each peer
+   * keeps its current direction from the Pillar, only its distance changes.
+   */
+  function applyDistanceScale(clusterId: string, scale: number) {
+    const updates = applyRingTransform(clusterId, (node, rootPos) => ({
+      x: rootPos.x + (node.cx - rootPos.x) * scale,
+      y: rootPos.y + (node.cy - rootPos.y) * scale,
+    }));
+    setDistancePicker(null);
+    if (!updates) return;
+    pushUndo({ type: "position", prev: overrides });
+    commitOverrides(updates);
+  }
+
+  function openSpacingPicker(nodeId: string) {
+    const clusterId = targetClusterForNode(nodeId);
+    const currentCount = clusterId ? getRingPeers(clusterId).length : 0;
+    if (!clusterId || currentCount === 0) return;
+    setSpacingPicker({ clusterId, currentCount });
     setContextMenu(null);
   }
 
   /**
-   * Redistributes this cluster's own Supporting bubbles evenly across `slotCount` angular positions
-   * around its Pillar (kept in their current rotational order), leaving unused arc as open space when
-   * slotCount exceeds the actual bubble count. Each bubble's current distance from the Pillar is kept
-   * — only its angle changes. Cascades into chained clusters same as distance-adjust.
+   * Redistributes every peer in this cluster's ring evenly across `slotCount` angular positions around
+   * its Pillar (kept in their current rotational order), leaving unused arc as open space when
+   * slotCount exceeds the actual peer count. Each peer's current distance from the Pillar is kept —
+   * only its angle changes.
    */
   function applySpacing(clusterId: string, slotCount: number) {
     const liveLayout = layoutByClusterId.get(clusterId);
-    if (!liveLayout || liveLayout.children.length === 0) {
+    if (!liveLayout) {
       setSpacingPicker(null);
       return;
     }
-
     const rootPos = { x: liveLayout.root.cx, y: liveLayout.root.cy };
-    const ordered = [...liveLayout.children].sort(
-      (a, b) => Math.atan2(a.cy - rootPos.y, a.cx - rootPos.x) - Math.atan2(b.cy - rootPos.y, b.cx - rootPos.x)
+    const ordered = getRingPeers(clusterId).sort(
+      (a, b) =>
+        Math.atan2(a.node.cy - rootPos.y, a.node.cx - rootPos.x) -
+        Math.atan2(b.node.cy - rootPos.y, b.node.cx - rootPos.x)
     );
+    const slotAngleByNodeId = new Map<string, number>();
+    ordered.forEach(({ node }, i) => slotAngleByNodeId.set(node.id, (i * (2 * Math.PI)) / slotCount - Math.PI / 2));
 
-    const updates: PositionOverrides = {};
-    const movedAnchors: { nodeId: string; dx: number; dy: number }[] = [];
-
-    ordered.forEach((child, i) => {
-      const dist = Math.hypot(child.cx - rootPos.x, child.cy - rootPos.y);
-      const angle = (i * (2 * Math.PI)) / slotCount - Math.PI / 2;
-      const newX = rootPos.x + dist * Math.cos(angle);
-      const newY = rootPos.y + dist * Math.sin(angle);
-      updates[child.id] = { x: newX, y: newY };
-      const dx = newX - child.cx;
-      const dy = newY - child.cy;
-      if (dx !== 0 || dy !== 0) movedAnchors.push({ nodeId: child.id, dx, dy });
+    const updates = applyRingTransform(clusterId, (node, rootPos) => {
+      const dist = Math.hypot(node.cx - rootPos.x, node.cy - rootPos.y);
+      const angle = slotAngleByNodeId.get(node.id) ?? 0;
+      return { x: rootPos.x + dist * Math.cos(angle), y: rootPos.y + dist * Math.sin(angle) };
     });
-
-    cascadeChainMoves(updates, movedAnchors, clusterId);
+    setSpacingPicker(null);
+    if (!updates) return;
     pushUndo({ type: "position", prev: overrides });
     commitOverrides(updates);
-    setSpacingPicker(null);
   }
 
   if (clusters.length === 0) {
@@ -648,15 +692,15 @@ export function ClusterDiagram() {
             <button type="button" onClick={() => openColorPicker(contextMenu.clusterId)}>
               Đổi màu cụm…
             </button>
-            {nodeById.get(contextMenu.nodeId)?.isRoot === false && (
-              <button type="button" onClick={() => openDistancePicker(contextMenu.clusterId, contextMenu.nodeId)}>
-                Điều chỉnh khoảng cách…
-              </button>
-            )}
-            {nodeById.get(contextMenu.nodeId)?.isRoot === false && (
-              <button type="button" onClick={() => openSpacingPicker(contextMenu.clusterId)}>
-                Điều chỉnh khoảng trống…
-              </button>
+            {targetClusterForNode(contextMenu.nodeId) && (
+              <>
+                <button type="button" onClick={() => openDistancePicker(contextMenu.nodeId)}>
+                  Điều chỉnh khoảng cách…
+                </button>
+                <button type="button" onClick={() => openSpacingPicker(contextMenu.nodeId)}>
+                  Điều chỉnh khoảng trống…
+                </button>
+              </>
             )}
           </div>
         </div>
