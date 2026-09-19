@@ -4,6 +4,8 @@ export interface TopicCluster {
   id: string;
   name: string;
   createdAt: string;
+  /** custom color override for every bubble in this cluster (hex, e.g. "#2563eb"); null/absent uses the auto-generated color */
+  color?: string | null;
 }
 
 export interface Article {

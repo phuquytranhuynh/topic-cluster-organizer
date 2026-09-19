@@ -1,5 +1,6 @@
 import * as d3 from "d3";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ColorPickerModal } from "./ColorPickerModal";
 import {
   applyPositionOverrides,
   buildCrossLinks,
@@ -19,16 +20,24 @@ const ZOOM_MIN = 0.05;
 const ZOOM_MAX = 8;
 const ZOOM_STEP = 1.3;
 
+/** One undo-able edit made on the diagram — either a drag (whole previous position map) or a cluster recolor. */
+type UndoEntry =
+  | { type: "position"; prev: PositionOverrides }
+  | { type: "color"; clusterId: string; prevColor: string | null };
+
 export function ClusterDiagram() {
-  const { clusters, articles } = useStore();
+  const { clusters, articles, updateClusterColor } = useStore();
   const svgRef = useRef<SVGSVGElement>(null);
   const zoomBehaviorRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const currentTransformRef = useRef<d3.ZoomTransform | null>(null);
   const prevBaseLayoutsRef = useRef<DiagramLayout["layouts"] | null>(null);
+  const undoStackRef = useRef<UndoEntry[]>([]);
   const [pageFormat, setPageFormat] = useState<PageFormatId>("a3");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<PositionOverrides>(() => loadPositions());
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; clusterId: string } | null>(null);
+  const [colorPicker, setColorPicker] = useState<{ clusterId: string; initialColor: string } | null>(null);
 
   const { layouts: baseLayouts } = useMemo(() => layoutDiagram(clusters, articles), [clusters, articles]);
   const layouts = useMemo(() => applyPositionOverrides(baseLayouts, overrides), [baseLayouts, overrides]);
@@ -52,6 +61,44 @@ export function ClusterDiagram() {
     setOverrides({});
     clearPositions();
   }
+
+  function undo() {
+    const entry = undoStackRef.current.pop();
+    if (!entry) return;
+    if (entry.type === "position") {
+      setOverrides(entry.prev);
+      savePositions(entry.prev);
+    } else {
+      updateClusterColor(entry.clusterId, entry.prevColor);
+    }
+  }
+
+  // Ctrl/Cmd+Z undoes the last drag or cluster recolor made in this diagram, for the common
+  // "misclicked and dragged a bubble by accident" slip. Mounted once — undoStackRef is a ref (always
+  // current) and setOverrides/updateClusterColor are stable, so no stale-closure risk.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        undo();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // Dismiss the context menu on Escape or on any click elsewhere; the menu/modal backdrops handle
+  // click-outside themselves, this only needs to cover the keyboard case.
+  useEffect(() => {
+    if (!contextMenu) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setContextMenu(null);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [contextMenu]);
 
   useEffect(() => {
     const svgEl = svgRef.current;
@@ -169,6 +216,20 @@ export function ClusterDiagram() {
       d3.select(this).append("title").text(`${titleAttr}${d.url ? ` — ${d.url}` : ""}`);
     });
 
+    // Right-click a bubble to recolor its whole cluster. Stops propagation so the svg-level handler
+    // below (which closes the menu for a right-click on empty background) doesn't immediately re-close it.
+    nodeGroups.on("contextmenu", function (event: MouseEvent, d) {
+      event.preventDefault();
+      event.stopPropagation();
+      const layout = clusterByNodeId.get(d.id);
+      if (!layout) return;
+      setContextMenu({ x: event.clientX, y: event.clientY, clusterId: layout.cluster.id });
+    });
+    svg.on("contextmenu", (event: MouseEvent) => {
+      event.preventDefault();
+      setContextMenu(null);
+    });
+
     function moveNode(node: RadialNode, x: number, y: number) {
       livePos.set(node.id, { x, y });
       const g = groupByNodeId.get(node.id);
@@ -202,6 +263,7 @@ export function ClusterDiagram() {
         const moved = d.isRoot && layout ? [layout.root, ...layout.children] : [d];
         const updates: PositionOverrides = {};
         for (const node of moved) updates[node.id] = livePos.get(node.id)!;
+        undoStackRef.current.push({ type: "position", prev: overrides });
         commitOverrides(updates);
       });
 
@@ -279,6 +341,19 @@ export function ClusterDiagram() {
     }
   }
 
+  function openColorPicker(clusterId: string) {
+    const currentColor = layouts.find((l) => l.cluster.id === clusterId)?.colors.root ?? "#2563eb";
+    setColorPicker({ clusterId, initialColor: currentColor });
+    setContextMenu(null);
+  }
+
+  function applyClusterColor(clusterId: string, color: string | null) {
+    const prevColor = clusters.find((c) => c.id === clusterId)?.color ?? null;
+    undoStackRef.current.push({ type: "color", clusterId, prevColor });
+    updateClusterColor(clusterId, color);
+    setColorPicker(null);
+  }
+
   if (clusters.length === 0) {
     return (
       <section className="panel">
@@ -298,7 +373,9 @@ export function ClusterDiagram() {
         <span className="legend-dot" style={{ background: colorForClusterIndex(0).child }} /> Bài Supporting &nbsp; —
         mỗi cụm một tông màu riêng, không trùng với cụm khác. Đường nét đứt nối cụm này với bài viết mà nó khai báo là nhánh con (xem tab "Nhập tay"/CSV,
         cột PillarOf). Kéo bong bóng Pillar để di chuyển cả cụm; kéo bong bóng Supporting để chỉnh riêng nó. Cuộn
-        chuột hoặc chụm 2 ngón để zoom, kéo nền trống để di chuyển khung nhìn.
+        chuột hoặc chụm 2 ngón để zoom, kéo nền trống để di chuyển khung nhìn. Chuột phải vào 1 bong bóng để đổi màu
+        cho cả cụm. Nhấn <code>Ctrl</code>+<code>Z</code> (hoặc <code>Cmd</code>+<code>Z</code>) để hoàn tác thao
+        tác kéo thả hoặc đổi màu gần nhất.
       </p>
 
       <div className="row pdf-export-row">
@@ -349,6 +426,29 @@ export function ClusterDiagram() {
           </button>
         </div>
       </div>
+
+      {contextMenu && (
+        <div className="modal-backdrop" style={{ background: "transparent" }} onClick={() => setContextMenu(null)}>
+          <div
+            className="context-menu"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button type="button" onClick={() => openColorPicker(contextMenu.clusterId)}>
+              Đổi màu cụm…
+            </button>
+          </div>
+        </div>
+      )}
+
+      {colorPicker && (
+        <ColorPickerModal
+          initialColor={colorPicker.initialColor}
+          onConfirm={(hex) => applyClusterColor(colorPicker.clusterId, hex)}
+          onReset={() => applyClusterColor(colorPicker.clusterId, null)}
+          onCancel={() => setColorPicker(null)}
+        />
+      )}
     </section>
   );
 }

@@ -170,9 +170,14 @@ function resolveParentClusterIds(articles: Article[]): Map<string, string> {
  * takes its parent's Supporting color (so every cluster chained onto the same parent visually reads
  * as "part of that branch", duplicates included) and sits one level deeper for sizing purposes. A
  * standalone cluster — and the fallback for a cycle or a dangling link — gets its own unique hue.
+ *
+ * A cluster with a manually-set `color` (via the right-click "Đổi màu cụm" picker) overrides all of
+ * this: every bubble in that cluster — Pillar and Supporting alike — uses the exact same custom color,
+ * and any cluster chained onto it still inherits that color for its own root, same as auto-colors do.
  */
 function resolveClusterMeta(clusters: TopicCluster[], parentOf: Map<string, string>): Map<string, ClusterMeta> {
   const clusterIds = new Set(clusters.map((c) => c.id));
+  const clusterById = new Map(clusters.map((c) => [c.id, c]));
   const meta = new Map<string, ClusterMeta>();
   const resolving = new Set<string>();
   let nextIdx = 0;
@@ -180,18 +185,22 @@ function resolveClusterMeta(clusters: TopicCluster[], parentOf: Map<string, stri
   function resolve(clusterId: string) {
     if (meta.has(clusterId)) return;
     const parentId = parentOf.get(clusterId);
+    let colors: { root: string; child: string };
+    let depth: number;
     if (!parentId || !clusterIds.has(parentId) || resolving.has(clusterId)) {
-      meta.set(clusterId, { colors: colorForClusterIndex(nextIdx++), depth: 0 });
-      return;
+      colors = colorForClusterIndex(nextIdx++);
+      depth = 0;
+    } else {
+      resolving.add(clusterId);
+      resolve(parentId);
+      resolving.delete(clusterId);
+      const parentMeta = meta.get(parentId)!;
+      colors = { root: parentMeta.colors.child, child: colorForClusterIndex(nextIdx++).child };
+      depth = parentMeta.depth + 1;
     }
-    resolving.add(clusterId);
-    resolve(parentId);
-    resolving.delete(clusterId);
-    const parentMeta = meta.get(parentId)!;
-    meta.set(clusterId, {
-      colors: { root: parentMeta.colors.child, child: colorForClusterIndex(nextIdx++).child },
-      depth: parentMeta.depth + 1,
-    });
+    const customColor = clusterById.get(clusterId)?.color;
+    if (customColor) colors = { root: customColor, child: customColor };
+    meta.set(clusterId, { colors, depth });
   }
 
   for (const c of clusters) resolve(c.id);

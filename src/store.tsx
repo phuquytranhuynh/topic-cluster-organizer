@@ -60,6 +60,7 @@ interface StoreApi {
   deleteArticle: (id: string) => void;
   importRows: (rows: RawCsvRow[]) => ImportResult;
   clusterPillars: (clusterId: string) => Article[];
+  updateClusterColor: (clusterId: string, color: string | null) => void;
   replaceAll: (data: StoreData) => void;
   resetAll: () => void;
 }
@@ -89,7 +90,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const getOrCreateCluster = (clusters: TopicCluster[], name: string): [TopicCluster, TopicCluster[]] => {
     const existing = findClusterByName(clusters, name);
     if (existing) return [existing, clusters];
-    const cluster: TopicCluster = { id: newId(), name: name.trim(), createdAt: new Date().toISOString() };
+    const cluster: TopicCluster = { id: newId(), name: name.trim(), createdAt: new Date().toISOString(), color: null };
     return [cluster, [...clusters, cluster]];
   };
 
@@ -252,6 +253,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [data.articles]
   );
 
+  const updateClusterColor = useCallback(
+    (clusterId: string, color: string | null) => {
+      commit((prev) => ({
+        ...prev,
+        clusters: prev.clusters.map((c) => (c.id === clusterId ? { ...c, color } : c)),
+      }));
+    },
+    [commit]
+  );
+
   const replaceAll = useCallback(
     (next: StoreData) => {
       commit(() => next);
@@ -273,10 +284,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteArticle,
       importRows,
       clusterPillars,
+      updateClusterColor,
       replaceAll,
       resetAll,
     }),
-    [data, addArticle, updateArticle, deleteArticle, importRows, clusterPillars, replaceAll, resetAll]
+    [data, addArticle, updateArticle, deleteArticle, importRows, clusterPillars, updateClusterColor, replaceAll, resetAll]
   );
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
