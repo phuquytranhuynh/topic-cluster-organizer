@@ -1,7 +1,6 @@
 import type { Article, TopicCluster } from "./types";
 
 export const ROOT_R = 70;
-const CHILD_R_BASE = 56;
 const CHILD_R_MIN = 26;
 const RING_R_BASE = 158;
 const NODE_GAP = 10;
@@ -121,10 +120,14 @@ export function applyPositionOverrides(
   }));
 }
 
-/** Shrinks child bubbles as a cluster gets crowded, so labels stay legible instead of overlapping. */
+/**
+ * Base radius for a Supporting bubble before its depth-based scale is applied — same base as a
+ * Pillar (ROOT_R), since size should depend only on depth, not on Pillar vs. Supporting role.
+ * Shrinks as a cluster gets crowded, so labels stay legible instead of overlapping.
+ */
 function childRadiusFor(n: number): number {
-  if (n <= 10) return CHILD_R_BASE;
-  return Math.max(CHILD_R_MIN, CHILD_R_BASE - (n - 10) * 1.4);
+  if (n <= 10) return ROOT_R;
+  return Math.max(CHILD_R_MIN, ROOT_R - (n - 10) * 1.4);
 }
 
 /** Grows the ring so evenly-spaced children never overlap each other or the root, however many there are. */
@@ -206,10 +209,11 @@ function buildSingleCluster(
   meta: ClusterMeta
 ): { cluster: TopicCluster; colors: { root: string; child: string }; root: RadialNode; children: RadialNode[]; diameter: number } {
   const { colors, depth } = meta;
-  // Root vs. its own Supporting bubbles keeps the usual size gap (ROOT_R vs CHILD_R_BASE) at every
-  // level — depth only scales the whole cluster down as one unit the deeper it's chained.
+  // Size depends only on depth, not on Pillar vs. Supporting role — a Supporting bubble sits one
+  // level deeper than its own Pillar, so it's the same size as a Pillar chained directly onto that
+  // Pillar would be (e.g. a Supporting bubble in the root cluster == the root's own chained clusters).
   const rootScale = levelScaleFor(depth);
-  const childScale = rootScale;
+  const childScale = levelScaleFor(depth + 1);
 
   const clusterArticles = articles.filter((a) => a.clusterId === cluster.id);
   const pillar = clusterArticles.find((a) => a.role === "pillar");
@@ -235,8 +239,8 @@ function buildSingleCluster(
     volume: pillar?.volume ?? null,
   };
 
-  const fontSize = Math.max(8, Math.round((13 * childR) / CHILD_R_BASE));
-  const maxChars = Math.max(6, Math.round((10 * childR) / CHILD_R_BASE));
+  const fontSize = Math.max(8, Math.round((13 * childR) / ROOT_R));
+  const maxChars = Math.max(6, Math.round((10 * childR) / ROOT_R));
 
   const children: RadialNode[] = rest.map((a, i) => {
     const angle = n ? (i * (2 * Math.PI)) / n - Math.PI / 2 : 0;
