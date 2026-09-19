@@ -198,9 +198,9 @@ function resolveClusterMeta(clusters: TopicCluster[], parentOf: Map<string, stri
   return meta;
 }
 
-/** Bubbles shrink 5% of the original size per hierarchy level (linear, not compounding), floored so a long chain never collapses to nothing. */
+/** Bubbles shrink 7% of the original size per hierarchy level (linear, not compounding), floored so a long chain never collapses to nothing. */
 function levelScaleFor(depth: number): number {
-  return Math.max(0.25, 1 - 0.05 * depth);
+  return Math.max(0.25, 1 - 0.07 * depth);
 }
 
 function buildSingleCluster(
