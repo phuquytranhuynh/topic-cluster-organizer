@@ -144,23 +144,40 @@ interface ClusterMeta {
   depth: number;
 }
 
+export interface ClusterChainLink {
+  /** id of the OTHER cluster this cluster hangs off of. */
+  parentClusterId: string;
+  /** id of the SPECIFIC article (in the parent cluster) this cluster's chain-forming article points at. */
+  anchorNodeId: string;
+}
+
 /**
- * For each cluster, the id of the OTHER cluster it hangs off of — i.e. some article in this cluster
- * (its Pillar first, else whichever Supporting article declares it) has PillarOf pointing at a node
- * that lives in a different cluster. Clusters with no such link are standalone/root clusters.
+ * For each cluster, which OTHER cluster it hangs off of and exactly which article anchors it there —
+ * i.e. some article in this cluster (its Pillar first, else whichever Supporting article declares it)
+ * has PillarOf pointing at a node that lives in a different cluster. Clusters with no such link are
+ * standalone/root clusters and are absent from the result.
  */
-export function resolveParentClusterIds(articles: Article[]): Map<string, string> {
+export function resolveClusterChainLinks(articles: Article[]): Map<string, ClusterChainLink> {
   const clusterIdByArticleId = new Map<string, string>();
   for (const a of articles) clusterIdByArticleId.set(a.id, a.clusterId);
 
-  const parentOf = new Map<string, string>();
+  const links = new Map<string, ClusterChainLink>();
   const pillarsFirst = [...articles].sort((a, b) => Number(a.role !== "pillar") - Number(b.role !== "pillar"));
   for (const a of pillarsFirst) {
-    if (parentOf.has(a.clusterId) || !a.linksTo) continue;
+    if (links.has(a.clusterId) || !a.linksTo) continue;
     const targetClusterId = clusterIdByArticleId.get(a.linksTo);
     if (targetClusterId && targetClusterId !== a.clusterId) {
-      parentOf.set(a.clusterId, targetClusterId);
+      links.set(a.clusterId, { parentClusterId: targetClusterId, anchorNodeId: a.linksTo });
     }
+  }
+  return links;
+}
+
+/** Same as {@link resolveClusterChainLinks}, but only the parent cluster id (drops the anchor node). */
+export function resolveParentClusterIds(articles: Article[]): Map<string, string> {
+  const parentOf = new Map<string, string>();
+  for (const [clusterId, link] of resolveClusterChainLinks(articles)) {
+    parentOf.set(clusterId, link.parentClusterId);
   }
   return parentOf;
 }

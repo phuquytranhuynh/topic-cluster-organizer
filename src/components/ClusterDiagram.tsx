@@ -1,6 +1,7 @@
 import * as d3 from "d3";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ColorPickerModal } from "./ColorPickerModal";
+import { DistanceAdjustModal } from "./DistanceAdjustModal";
 import {
   applyPositionOverrides,
   buildCrossLinks,
@@ -8,7 +9,7 @@ import {
   computeBounds,
   computeLabelLayout,
   layoutDiagram,
-  resolveParentClusterIds,
+  resolveClusterChainLinks,
   type ClusterLayout,
   type DiagramLayout,
   type RadialNode,
@@ -21,7 +22,7 @@ const ZOOM_MIN = 0.05;
 const ZOOM_MAX = 8;
 const ZOOM_STEP = 1.3;
 
-/** One undo-able edit made on the diagram — either a drag (whole previous position map) or a cluster recolor. */
+/** One undo/redo-able edit made on the diagram — a batch of position moves (drag or distance-adjust), or a cluster recolor. */
 type UndoEntry =
   | { type: "position"; prev: PositionOverrides }
   | { type: "color"; clusterId: string; prevColor: string | null };
@@ -33,19 +34,66 @@ export function ClusterDiagram() {
   const currentTransformRef = useRef<d3.ZoomTransform | null>(null);
   const prevBaseLayoutsRef = useRef<DiagramLayout["layouts"] | null>(null);
   const undoStackRef = useRef<UndoEntry[]>([]);
+  const redoStackRef = useRef<UndoEntry[]>([]);
+  // Kept in sync every render so the keydown-triggered undo/redo (attached once, on mount) always
+  // reads the current values instead of whatever they were when that listener was first attached.
+  const overridesRef = useRef<PositionOverrides>({});
+  const clustersRef = useRef(clusters);
   const [pageFormat, setPageFormat] = useState<PageFormatId>("a3");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<PositionOverrides>(() => loadPositions());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; clusterId: string } | null>(null);
   const [colorPicker, setColorPicker] = useState<{ clusterId: string; initialColor: string } | null>(null);
+  const [distancePicker, setDistancePicker] = useState<{ clusterId: string } | null>(null);
+  overridesRef.current = overrides;
+  clustersRef.current = clusters;
 
   const { layouts: baseLayouts } = useMemo(() => layoutDiagram(clusters, articles), [clusters, articles]);
   const layouts = useMemo(() => applyPositionOverrides(baseLayouts, overrides), [baseLayouts, overrides]);
   const crossLinks = useMemo(() => buildCrossLinks(layouts), [layouts]);
   const bounds = useMemo(() => computeBounds(layouts), [layouts]);
-  // clusterId -> parent clusterId it's chained onto (PillarOf), for the Ctrl+drag "move whole chain" gesture.
-  const parentClusterOf = useMemo(() => resolveParentClusterIds(articles), [articles]);
+  // clusterId -> {parentClusterId, anchorNodeId}, for the Ctrl+drag "move whole chain" gesture and for
+  // cascading a distance adjustment down into whatever's chained onto the bubbles that just moved.
+  const chainLinks = useMemo(() => resolveClusterChainLinks(articles), [articles]);
+  // clusterId -> ids of clusters chained directly onto it.
+  const childClusterIds = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const [childId, link] of chainLinks) {
+      const list = map.get(link.parentClusterId);
+      if (list) list.push(childId);
+      else map.set(link.parentClusterId, [childId]);
+    }
+    return map;
+  }, [chainLinks]);
+  // anchor article id -> ids of clusters chained onto exactly that article.
+  const clustersAnchoredAt = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const [childId, link] of chainLinks) {
+      const list = map.get(link.anchorNodeId);
+      if (list) list.push(childId);
+      else map.set(link.anchorNodeId, [childId]);
+    }
+    return map;
+  }, [chainLinks]);
+  const layoutByClusterId = useMemo(() => new Map(layouts.map((l) => [l.cluster.id, l])), [layouts]);
+  const baseLayoutByClusterId = useMemo(() => new Map(baseLayouts.map((l) => [l.cluster.id, l])), [baseLayouts]);
+  const nodeById = useMemo(() => {
+    const map = new Map<string, RadialNode>();
+    for (const l of layouts) for (const n of [l.root, ...l.children]) map.set(n.id, n);
+    return map;
+  }, [layouts]);
+
+  function collectChainNodes(clusterId: string, visited = new Set<string>()): RadialNode[] {
+    if (visited.has(clusterId)) return [];
+    visited.add(clusterId);
+    const layout = layoutByClusterId.get(clusterId);
+    const nodes = layout ? [layout.root, ...layout.children] : [];
+    for (const childId of childClusterIds.get(clusterId) ?? []) {
+      nodes.push(...collectChainNodes(childId, visited));
+    }
+    return nodes;
+  }
 
   const pageEstimate = useMemo(
     () => estimatePageGrid(bounds.width, bounds.height, pageFormat),
@@ -65,9 +113,22 @@ export function ClusterDiagram() {
     clearPositions();
   }
 
-  function undo() {
-    const entry = undoStackRef.current.pop();
-    if (!entry) return;
+  function pushUndo(entry: UndoEntry) {
+    undoStackRef.current.push(entry);
+    redoStackRef.current = [];
+  }
+
+  /** The entry that would reverse `entry`, captured from the state right before `entry` is (re)applied. */
+  function captureInverse(entry: UndoEntry): UndoEntry {
+    if (entry.type === "position") return { type: "position", prev: overridesRef.current };
+    return {
+      type: "color",
+      clusterId: entry.clusterId,
+      prevColor: clustersRef.current.find((c) => c.id === entry.clusterId)?.color ?? null,
+    };
+  }
+
+  function applyEntry(entry: UndoEntry) {
     if (entry.type === "position") {
       setOverrides(entry.prev);
       savePositions(entry.prev);
@@ -76,16 +137,31 @@ export function ClusterDiagram() {
     }
   }
 
-  // Ctrl/Cmd+Z undoes the last drag or cluster recolor made in this diagram, for the common
-  // "misclicked and dragged a bubble by accident" slip. Mounted once — undoStackRef is a ref (always
-  // current) and setOverrides/updateClusterColor are stable, so no stale-closure risk.
+  function undo() {
+    const entry = undoStackRef.current.pop();
+    if (!entry) return;
+    redoStackRef.current.push(captureInverse(entry));
+    applyEntry(entry);
+  }
+
+  function redo() {
+    const entry = redoStackRef.current.pop();
+    if (!entry) return;
+    undoStackRef.current.push(captureInverse(entry));
+    applyEntry(entry);
+  }
+
+  // Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z redoes, the last drag / distance adjustment / cluster recolor
+  // made in this diagram. Mounted once — undo/redo read overridesRef/clustersRef (kept fresh every
+  // render above) rather than closing over stale state, so there's no stale-closure risk here.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z") {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
-        undo();
+        if (e.shiftKey) redo();
+        else undo();
       }
     }
     window.addEventListener("keydown", onKeyDown);
@@ -118,31 +194,11 @@ export function ClusterDiagram() {
     // memoized RadialNode objects), so redraws stay driven purely by React state.
     const livePos = new Map<string, { x: number; y: number }>();
     const clusterByNodeId = new Map<string, ClusterLayout>();
-    const layoutByClusterId = new Map<string, ClusterLayout>();
     for (const layout of layouts) {
-      layoutByClusterId.set(layout.cluster.id, layout);
       for (const node of [layout.root, ...layout.children]) {
         livePos.set(node.id, { x: node.cx, y: node.cy });
         clusterByNodeId.set(node.id, layout);
       }
-    }
-
-    // clusterId -> ids of clusters chained directly onto it, for the Ctrl+drag "move whole chain" gesture.
-    const childClusterIds = new Map<string, string[]>();
-    for (const [childId, parentId] of parentClusterOf) {
-      const list = childClusterIds.get(parentId);
-      if (list) list.push(childId);
-      else childClusterIds.set(parentId, [childId]);
-    }
-    function collectChainNodes(clusterId: string, visited = new Set<string>()): RadialNode[] {
-      if (visited.has(clusterId)) return [];
-      visited.add(clusterId);
-      const layout = layoutByClusterId.get(clusterId);
-      const nodes = layout ? [layout.root, ...layout.children] : [];
-      for (const childId of childClusterIds.get(clusterId) ?? []) {
-        nodes.push(...collectChainNodes(childId, visited));
-      }
-      return nodes;
     }
 
     const linesByNodeId = new Map<string, { el: SVGLineElement; end: "from" | "to" }[]>();
@@ -296,7 +352,7 @@ export function ClusterDiagram() {
         d3.select(this).classed("dragging", false);
         const updates: PositionOverrides = {};
         for (const node of dragMoveSet) updates[node.id] = livePos.get(node.id)!;
-        undoStackRef.current.push({ type: "position", prev: overrides });
+        pushUndo({ type: "position", prev: overrides });
         commitOverrides(updates);
         dragMoveSet = [];
       });
@@ -336,7 +392,7 @@ export function ClusterDiagram() {
     } else {
       svg.call(zoomBehavior.transform, currentTransformRef.current);
     }
-  }, [layouts, crossLinks, bounds, baseLayouts, parentClusterOf]);
+  }, [layouts, crossLinks, bounds, baseLayouts, childClusterIds]);
 
   function zoomBy(factor: number) {
     const svgEl = svgRef.current;
@@ -383,9 +439,70 @@ export function ClusterDiagram() {
 
   function applyClusterColor(clusterId: string, color: string | null) {
     const prevColor = clusters.find((c) => c.id === clusterId)?.color ?? null;
-    undoStackRef.current.push({ type: "color", clusterId, prevColor });
+    pushUndo({ type: "color", clusterId, prevColor });
     updateClusterColor(clusterId, color);
     setColorPicker(null);
+  }
+
+  function openDistancePicker(clusterId: string) {
+    setDistancePicker({ clusterId });
+    setContextMenu(null);
+  }
+
+  /**
+   * Rescales how far this cluster's own Supporting bubbles sit from its Pillar (relative to the
+   * auto-computed default), then shifts whatever is chained onto any bubble that moved — recursively,
+   * arbitrarily deep — by that same bubble's delta, so a whole downstream branch follows its anchor
+   * point instead of being left behind.
+   */
+  function applyDistanceScale(clusterId: string, scale: number) {
+    const baseLayout = baseLayoutByClusterId.get(clusterId);
+    const liveLayout = layoutByClusterId.get(clusterId);
+    if (!baseLayout || !liveLayout || baseLayout.children.length === 0) {
+      setDistancePicker(null);
+      return;
+    }
+
+    const rootPos = { x: liveLayout.root.cx, y: liveLayout.root.cy };
+    const autoRingR = Math.hypot(
+      baseLayout.children[0].cx - baseLayout.root.cx,
+      baseLayout.children[0].cy - baseLayout.root.cy
+    );
+    const newRingR = autoRingR * scale;
+
+    const updates: PositionOverrides = {};
+    const movedAnchors: { nodeId: string; dx: number; dy: number }[] = [];
+
+    baseLayout.children.forEach((baseChild, i) => {
+      const angle = Math.atan2(baseChild.cy - baseLayout.root.cy, baseChild.cx - baseLayout.root.cx);
+      const newX = rootPos.x + newRingR * Math.cos(angle);
+      const newY = rootPos.y + newRingR * Math.sin(angle);
+      const liveChild = liveLayout.children[i];
+      updates[liveChild.id] = { x: newX, y: newY };
+      const dx = newX - liveChild.cx;
+      const dy = newY - liveChild.cy;
+      if (dx !== 0 || dy !== 0) movedAnchors.push({ nodeId: liveChild.id, dx, dy });
+    });
+
+    // Whatever is chained onto a bubble that just moved follows it — as one rigid unit, same as
+    // Ctrl+drag — so a branch attached further down doesn't get left behind at its old spot.
+    const shiftedClusters = new Set([clusterId]);
+    function cascade(nodeId: string, dx: number, dy: number) {
+      for (const childClusterId of clustersAnchoredAt.get(nodeId) ?? []) {
+        if (shiftedClusters.has(childClusterId)) continue;
+        shiftedClusters.add(childClusterId);
+        for (const node of collectChainNodes(childClusterId)) {
+          const current = nodeById.get(node.id);
+          if (!current) continue;
+          updates[node.id] = { x: current.cx + dx, y: current.cy + dy };
+        }
+      }
+    }
+    for (const { nodeId, dx, dy } of movedAnchors) cascade(nodeId, dx, dy);
+
+    pushUndo({ type: "position", prev: overrides });
+    commitOverrides(updates);
+    setDistancePicker(null);
   }
 
   if (clusters.length === 0) {
@@ -409,8 +526,9 @@ export function ClusterDiagram() {
         cột PillarOf). Kéo bong bóng Pillar để di chuyển cả cụm; kéo bong bóng Supporting để chỉnh riêng nó. Giữ{" "}
         <code>Ctrl</code> (hoặc <code>Cmd</code>) trong lúc kéo để di chuyển cả chuỗi — cụm đang kéo cùng mọi cụm nối
         chuỗi bên dưới nó — theo trỏ chuột. Cuộn chuột hoặc chụm 2 ngón để zoom, kéo nền trống để di chuyển khung
-        nhìn. Chuột phải vào 1 bong bóng để đổi màu cho cả cụm. Nhấn <code>Ctrl</code>+<code>Z</code> (hoặc{" "}
-        <code>Cmd</code>+<code>Z</code>) để hoàn tác thao tác kéo thả hoặc đổi màu gần nhất.
+        nhìn. Chuột phải vào 1 bong bóng để đổi màu cho cả cụm hoặc điều chỉnh khoảng cách các bong bóng Supporting
+        so với Pillar. Nhấn <code>Ctrl</code>+<code>Z</code> (hoặc <code>Cmd</code>+<code>Z</code>) để hoàn tác,{" "}
+        <code>Ctrl</code>+<code>Shift</code>+<code>Z</code> để làm lại thao tác vừa hoàn tác.
       </p>
 
       <div className="row pdf-export-row">
@@ -472,6 +590,11 @@ export function ClusterDiagram() {
             <button type="button" onClick={() => openColorPicker(contextMenu.clusterId)}>
               Đổi màu cụm…
             </button>
+            {(layoutByClusterId.get(contextMenu.clusterId)?.children.length ?? 0) > 0 && (
+              <button type="button" onClick={() => openDistancePicker(contextMenu.clusterId)}>
+                Điều chỉnh khoảng cách…
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -482,6 +605,13 @@ export function ClusterDiagram() {
           onConfirm={(hex) => applyClusterColor(colorPicker.clusterId, hex)}
           onReset={() => applyClusterColor(colorPicker.clusterId, null)}
           onCancel={() => setColorPicker(null)}
+        />
+      )}
+
+      {distancePicker && (
+        <DistanceAdjustModal
+          onConfirm={(scale) => applyDistanceScale(distancePicker.clusterId, scale)}
+          onCancel={() => setDistancePicker(null)}
         />
       )}
     </section>
