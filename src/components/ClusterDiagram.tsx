@@ -43,9 +43,15 @@ export function ClusterDiagram() {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<PositionOverrides>(() => loadPositions());
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; clusterId: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; clusterId: string; nodeId: string } | null>(
+    null
+  );
   const [colorPicker, setColorPicker] = useState<{ clusterId: string; initialColor: string } | null>(null);
-  const [distancePicker, setDistancePicker] = useState<{ clusterId: string } | null>(null);
+  const [distancePicker, setDistancePicker] = useState<{
+    clusterId: string;
+    referenceLabel: string;
+    referenceDistance: number;
+  } | null>(null);
   overridesRef.current = overrides;
   clustersRef.current = clusters;
 
@@ -77,7 +83,6 @@ export function ClusterDiagram() {
     return map;
   }, [chainLinks]);
   const layoutByClusterId = useMemo(() => new Map(layouts.map((l) => [l.cluster.id, l])), [layouts]);
-  const baseLayoutByClusterId = useMemo(() => new Map(baseLayouts.map((l) => [l.cluster.id, l])), [baseLayouts]);
   const nodeById = useMemo(() => {
     const map = new Map<string, RadialNode>();
     for (const l of layouts) for (const n of [l.root, ...l.children]) map.set(n.id, n);
@@ -295,14 +300,15 @@ export function ClusterDiagram() {
       d3.select(this).append("title").text(`${titleAttr}${d.url ? ` — ${d.url}` : ""}`);
     });
 
-    // Right-click a bubble to recolor its whole cluster. Stops propagation so the svg-level handler
-    // below (which closes the menu for a right-click on empty background) doesn't immediately re-close it.
+    // Right-click a bubble to recolor its whole cluster or adjust distances. Stops propagation so the
+    // svg-level handler below (which closes the menu for a right-click on empty background) doesn't
+    // immediately re-close it.
     nodeGroups.on("contextmenu", function (event: MouseEvent, d) {
       event.preventDefault();
       event.stopPropagation();
       const layout = clusterByNodeId.get(d.id);
       if (!layout) return;
-      setContextMenu({ x: event.clientX, y: event.clientY, clusterId: layout.cluster.id });
+      setContextMenu({ x: event.clientX, y: event.clientY, clusterId: layout.cluster.id, nodeId: d.id });
     });
     svg.on("contextmenu", (event: MouseEvent) => {
       event.preventDefault();
@@ -444,45 +450,40 @@ export function ClusterDiagram() {
     setColorPicker(null);
   }
 
-  function openDistancePicker(clusterId: string) {
-    setDistancePicker({ clusterId });
+  function openDistancePicker(clusterId: string, nodeId: string) {
+    const liveLayout = layoutByClusterId.get(clusterId);
+    const node = nodeById.get(nodeId);
+    if (!liveLayout || !node) return;
+    const referenceDistance = Math.hypot(node.cx - liveLayout.root.cx, node.cy - liveLayout.root.cy);
+    setDistancePicker({ clusterId, referenceLabel: node.title, referenceDistance });
     setContextMenu(null);
   }
 
   /**
-   * Rescales how far this cluster's own Supporting bubbles sit from its Pillar (relative to the
-   * auto-computed default), then shifts whatever is chained onto any bubble that moved — recursively,
-   * arbitrarily deep — by that same bubble's delta, so a whole downstream branch follows its anchor
-   * point instead of being left behind.
+   * Rescales how far this cluster's own Supporting bubbles currently sit from its Pillar — each bubble
+   * keeps its current direction from the Pillar, only its distance changes — then shifts whatever is
+   * chained onto any bubble that moved, recursively and arbitrarily deep, by that same bubble's delta,
+   * so a whole downstream branch follows its anchor point instead of being left behind.
    */
   function applyDistanceScale(clusterId: string, scale: number) {
-    const baseLayout = baseLayoutByClusterId.get(clusterId);
     const liveLayout = layoutByClusterId.get(clusterId);
-    if (!baseLayout || !liveLayout || baseLayout.children.length === 0) {
+    if (!liveLayout || liveLayout.children.length === 0) {
       setDistancePicker(null);
       return;
     }
 
     const rootPos = { x: liveLayout.root.cx, y: liveLayout.root.cy };
-    const autoRingR = Math.hypot(
-      baseLayout.children[0].cx - baseLayout.root.cx,
-      baseLayout.children[0].cy - baseLayout.root.cy
-    );
-    const newRingR = autoRingR * scale;
-
     const updates: PositionOverrides = {};
     const movedAnchors: { nodeId: string; dx: number; dy: number }[] = [];
 
-    baseLayout.children.forEach((baseChild, i) => {
-      const angle = Math.atan2(baseChild.cy - baseLayout.root.cy, baseChild.cx - baseLayout.root.cx);
-      const newX = rootPos.x + newRingR * Math.cos(angle);
-      const newY = rootPos.y + newRingR * Math.sin(angle);
-      const liveChild = liveLayout.children[i];
-      updates[liveChild.id] = { x: newX, y: newY };
-      const dx = newX - liveChild.cx;
-      const dy = newY - liveChild.cy;
-      if (dx !== 0 || dy !== 0) movedAnchors.push({ nodeId: liveChild.id, dx, dy });
-    });
+    for (const child of liveLayout.children) {
+      const newX = rootPos.x + (child.cx - rootPos.x) * scale;
+      const newY = rootPos.y + (child.cy - rootPos.y) * scale;
+      updates[child.id] = { x: newX, y: newY };
+      const dx = newX - child.cx;
+      const dy = newY - child.cy;
+      if (dx !== 0 || dy !== 0) movedAnchors.push({ nodeId: child.id, dx, dy });
+    }
 
     // Whatever is chained onto a bubble that just moved follows it — as one rigid unit, same as
     // Ctrl+drag — so a branch attached further down doesn't get left behind at its old spot.
@@ -526,8 +527,9 @@ export function ClusterDiagram() {
         cột PillarOf). Kéo bong bóng Pillar để di chuyển cả cụm; kéo bong bóng Supporting để chỉnh riêng nó. Giữ{" "}
         <code>Ctrl</code> (hoặc <code>Cmd</code>) trong lúc kéo để di chuyển cả chuỗi — cụm đang kéo cùng mọi cụm nối
         chuỗi bên dưới nó — theo trỏ chuột. Cuộn chuột hoặc chụm 2 ngón để zoom, kéo nền trống để di chuyển khung
-        nhìn. Chuột phải vào 1 bong bóng để đổi màu cho cả cụm hoặc điều chỉnh khoảng cách các bong bóng Supporting
-        so với Pillar. Nhấn <code>Ctrl</code>+<code>Z</code> (hoặc <code>Cmd</code>+<code>Z</code>) để hoàn tác,{" "}
+        nhìn. Chuột phải vào 1 bong bóng để đổi màu cho cả cụm; chuột phải vào 1 bong bóng Supporting để điều chỉnh
+        khoảng cách của mọi bong bóng Supporting khác trong cụm so với Pillar. Nhấn <code>Ctrl</code>+<code>Z</code>{" "}
+        (hoặc <code>Cmd</code>+<code>Z</code>) để hoàn tác,{" "}
         <code>Ctrl</code>+<code>Shift</code>+<code>Z</code> để làm lại thao tác vừa hoàn tác.
       </p>
 
@@ -590,8 +592,8 @@ export function ClusterDiagram() {
             <button type="button" onClick={() => openColorPicker(contextMenu.clusterId)}>
               Đổi màu cụm…
             </button>
-            {(layoutByClusterId.get(contextMenu.clusterId)?.children.length ?? 0) > 0 && (
-              <button type="button" onClick={() => openDistancePicker(contextMenu.clusterId)}>
+            {nodeById.get(contextMenu.nodeId)?.isRoot === false && (
+              <button type="button" onClick={() => openDistancePicker(contextMenu.clusterId, contextMenu.nodeId)}>
                 Điều chỉnh khoảng cách…
               </button>
             )}
@@ -610,6 +612,8 @@ export function ClusterDiagram() {
 
       {distancePicker && (
         <DistanceAdjustModal
+          referenceLabel={distancePicker.referenceLabel}
+          referenceDistance={distancePicker.referenceDistance}
           onConfirm={(scale) => applyDistanceScale(distancePicker.clusterId, scale)}
           onCancel={() => setDistancePicker(null)}
         />
