@@ -47,6 +47,8 @@ export interface RadialNode {
   isRoot: boolean;
   fontSize: number;
   maxChars: number;
+  /** reserved margin (px) around this node for its label to overshoot into, used by computeBounds. */
+  labelPadding: number;
   /** id of the article this node's PillarOf points to (may live in another cluster) — drives cross-cluster links. */
   linksTo: string | null;
   /** monthly search volume, shown as a smaller line under the title; null if not provided. */
@@ -78,7 +80,7 @@ export interface DiagramLayout {
   bounds: Bounds;
 }
 
-/** Room around a node's true radius reserved for its wrapped label overshooting the circle. */
+/** Default room around a node's true radius reserved for its wrapped label overshooting the circle. */
 const BOUNDS_PADDING = 90;
 
 /**
@@ -94,10 +96,10 @@ export function computeBounds(layouts: ClusterLayout[]): Bounds {
   let maxY = -Infinity;
   for (const layout of layouts) {
     for (const node of [layout.root, ...layout.children]) {
-      minX = Math.min(minX, node.cx - node.r - BOUNDS_PADDING);
-      maxX = Math.max(maxX, node.cx + node.r + BOUNDS_PADDING);
-      minY = Math.min(minY, node.cy - node.r - BOUNDS_PADDING);
-      maxY = Math.max(maxY, node.cy + node.r + BOUNDS_PADDING);
+      minX = Math.min(minX, node.cx - node.r - node.labelPadding);
+      maxX = Math.max(maxX, node.cx + node.r + node.labelPadding);
+      minY = Math.min(minY, node.cy - node.r - node.labelPadding);
+      maxY = Math.max(maxY, node.cy + node.r + node.labelPadding);
     }
   }
   return { minX, minY, width: maxX - minX, height: maxY - minY };
@@ -229,6 +231,29 @@ function levelScaleFor(depth: number): number {
   return Math.max(0.25, 1 - 0.07 * depth);
 }
 
+/**
+ * Font size / max-chars-per-line / label-overflow-margin for a node, honoring per-article custom
+ * overrides where set. When not overridden, font size and max-chars scale automatically with `r` —
+ * whatever `r` ends up being, including a custom radius override — so resizing a bubble without also
+ * setting a custom font naturally scales its default text too.
+ */
+function effectiveVisuals(
+  article: Article | undefined,
+  autoR: number,
+  fontBase: number,
+  fontFloor: number,
+  charsBase: number,
+  charsFloor: number
+): { r: number; fontSize: number; maxChars: number; labelPadding: number } {
+  const r = article?.radiusOverride ?? autoR;
+  return {
+    r,
+    fontSize: article?.fontSizeOverride ?? Math.max(fontFloor, Math.round(fontBase * (r / ROOT_R))),
+    maxChars: article?.maxCharsOverride ?? Math.max(charsFloor, Math.round(charsBase * (r / ROOT_R))),
+    labelPadding: article?.labelPaddingOverride ?? BOUNDS_PADDING,
+  };
+}
+
 function buildSingleCluster(
   cluster: TopicCluster,
   articles: Article[],
@@ -246,47 +271,50 @@ function buildSingleCluster(
   const rest = clusterArticles.filter((a) => a.id !== pillar?.id);
 
   const n = rest.length;
-  const rootR = ROOT_R * rootScale;
-  const childR = childRadiusFor(n) * childScale;
-  const ringR = ringRadiusFor(n, childR, rootR, rootScale);
+  const autoRootR = ROOT_R * rootScale;
+  const autoChildR = childRadiusFor(n) * childScale;
+  // Ring/cluster packing is sized off the AUTO radii, not any custom override — same as manual drag
+  // positions, a size override reshapes the rendered bubble without reflowing the auto layout around it.
+  const ringR = ringRadiusFor(n, autoChildR, autoRootR, rootScale);
 
+  const rootVisuals = effectiveVisuals(pillar, autoRootR, 15, 9, 12, 6);
   const root: RadialNode = {
     id: pillar?.id ?? `cluster-${cluster.id}`,
     title: pillar?.title ?? cluster.name,
     url: pillar?.url,
     cx: 0,
     cy: 0,
-    r: rootR,
+    r: rootVisuals.r,
     fill: colors.root,
     isRoot: true,
-    fontSize: Math.max(9, Math.round(15 * rootScale)),
-    maxChars: Math.max(6, Math.round(12 * rootScale)),
+    fontSize: rootVisuals.fontSize,
+    maxChars: rootVisuals.maxChars,
+    labelPadding: rootVisuals.labelPadding,
     linksTo: pillar?.linksTo ?? null,
     volume: pillar?.volume ?? null,
   };
 
-  const fontSize = Math.max(8, Math.round((13 * childR) / ROOT_R));
-  const maxChars = Math.max(6, Math.round((10 * childR) / ROOT_R));
-
   const children: RadialNode[] = rest.map((a, i) => {
     const angle = n ? (i * (2 * Math.PI)) / n - Math.PI / 2 : 0;
+    const visuals = effectiveVisuals(a, autoChildR, 13, 8, 10, 6);
     return {
       id: a.id,
       title: a.title,
       url: a.url,
       cx: ringR * Math.cos(angle),
       cy: ringR * Math.sin(angle),
-      r: childR,
+      r: visuals.r,
       fill: colors.child,
       isRoot: false,
-      fontSize,
-      maxChars,
+      fontSize: visuals.fontSize,
+      maxChars: visuals.maxChars,
+      labelPadding: visuals.labelPadding,
       linksTo: a.linksTo,
       volume: a.volume,
     };
   });
 
-  const diameter = 2 * (ringR + childR) + CLUSTER_MARGIN * rootScale;
+  const diameter = 2 * (ringR + autoChildR) + CLUSTER_MARGIN * rootScale;
   return { cluster, colors, root, children, diameter };
 }
 

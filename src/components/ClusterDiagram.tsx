@@ -2,7 +2,9 @@ import * as d3 from "d3";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ColorPickerModal } from "./ColorPickerModal";
 import { DistanceAdjustModal } from "./DistanceAdjustModal";
+import { SizeAdjustModal } from "./SizeAdjustModal";
 import { SpacingAdjustModal } from "./SpacingAdjustModal";
+import { TextStyleAdjustModal } from "./TextStyleAdjustModal";
 import {
   applyPositionOverrides,
   buildCrossLinks,
@@ -17,19 +19,23 @@ import {
 } from "../diagramLayout";
 import { clearPositions, loadPositions, savePositions, type PositionOverrides } from "../diagramPositions";
 import { FIT_OPTION, PAGE_FORMATS, estimatePageGrid, type PageFormatId } from "../pdf/pageFormats";
-import { useStore } from "../store";
+import { useStore, type ArticleDisplayOverrides } from "../store";
 
 const ZOOM_MIN = 0.05;
 const ZOOM_MAX = 8;
 const ZOOM_STEP = 1.3;
 
-/** One undo/redo-able edit made on the diagram — a batch of position moves (drag or distance-adjust), or a cluster recolor. */
+/**
+ * One undo/redo-able edit made on the diagram — a batch of position moves (drag, distance, or spacing
+ * adjust), a cluster recolor, or a batch of per-article display overrides (size/font/chars/padding).
+ */
 type UndoEntry =
   | { type: "position"; prev: PositionOverrides }
-  | { type: "color"; clusterId: string; prevColor: string | null };
+  | { type: "color"; clusterId: string; prevColor: string | null }
+  | { type: "display"; patchByArticleId: Record<string, ArticleDisplayOverrides> };
 
 export function ClusterDiagram() {
-  const { clusters, articles, updateClusterColor } = useStore();
+  const { clusters, articles, updateClusterColor, updateArticlesDisplay } = useStore();
   const svgRef = useRef<SVGSVGElement>(null);
   const zoomBehaviorRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const currentTransformRef = useRef<d3.ZoomTransform | null>(null);
@@ -40,6 +46,7 @@ export function ClusterDiagram() {
   // reads the current values instead of whatever they were when that listener was first attached.
   const overridesRef = useRef<PositionOverrides>({});
   const clustersRef = useRef(clusters);
+  const articlesRef = useRef(articles);
   const [pageFormat, setPageFormat] = useState<PageFormatId>("a3");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -54,8 +61,19 @@ export function ClusterDiagram() {
     referenceDistance: number;
   } | null>(null);
   const [spacingPicker, setSpacingPicker] = useState<{ clusterId: string; currentCount: number } | null>(null);
+  const [sizePicker, setSizePicker] = useState<{ clusterId: string; referenceLabel: string; referenceRadius: number } | null>(
+    null
+  );
+  const [textStylePicker, setTextStylePicker] = useState<{
+    clusterId: string;
+    referenceLabel: string;
+    fontSize: number;
+    maxChars: number;
+    labelPadding: number;
+  } | null>(null);
   overridesRef.current = overrides;
   clustersRef.current = clusters;
+  articlesRef.current = articles;
 
   const { layouts: baseLayouts } = useMemo(() => layoutDiagram(clusters, articles), [clusters, articles]);
   const layouts = useMemo(() => applyPositionOverrides(baseLayouts, overrides), [baseLayouts, overrides]);
@@ -166,19 +184,33 @@ export function ClusterDiagram() {
   /** The entry that would reverse `entry`, captured from the state right before `entry` is (re)applied. */
   function captureInverse(entry: UndoEntry): UndoEntry {
     if (entry.type === "position") return { type: "position", prev: overridesRef.current };
-    return {
-      type: "color",
-      clusterId: entry.clusterId,
-      prevColor: clustersRef.current.find((c) => c.id === entry.clusterId)?.color ?? null,
-    };
+    if (entry.type === "color") {
+      return {
+        type: "color",
+        clusterId: entry.clusterId,
+        prevColor: clustersRef.current.find((c) => c.id === entry.clusterId)?.color ?? null,
+      };
+    }
+    const patchByArticleId: Record<string, ArticleDisplayOverrides> = {};
+    for (const [articleId, patch] of Object.entries(entry.patchByArticleId)) {
+      const article = articlesRef.current.find((a) => a.id === articleId);
+      const prev: ArticleDisplayOverrides = {};
+      for (const key of Object.keys(patch) as (keyof ArticleDisplayOverrides)[]) {
+        prev[key] = article?.[key] ?? null;
+      }
+      patchByArticleId[articleId] = prev;
+    }
+    return { type: "display", patchByArticleId };
   }
 
   function applyEntry(entry: UndoEntry) {
     if (entry.type === "position") {
       setOverrides(entry.prev);
       savePositions(entry.prev);
-    } else {
+    } else if (entry.type === "color") {
       updateClusterColor(entry.clusterId, entry.prevColor);
+    } else {
+      updateArticlesDisplay(entry.patchByArticleId);
     }
   }
 
@@ -607,6 +639,77 @@ export function ClusterDiagram() {
     commitOverrides(updates);
   }
 
+  /**
+   * Writes the same display-override patch onto every peer article in this cluster's ring — used by
+   * size and text-style adjustment alike. Passing `null` for a field clears that override, falling
+   * back to the auto depth-based default.
+   */
+  function applyDisplayPatch(clusterId: string, patch: ArticleDisplayOverrides) {
+    const peerArticleIds = getRingPeers(clusterId)
+      .map(({ node }) => node.id)
+      .filter((id) => articles.some((a) => a.id === id));
+    if (peerArticleIds.length === 0) return;
+
+    const keys = Object.keys(patch) as (keyof ArticleDisplayOverrides)[];
+    const patchByArticleId: Record<string, ArticleDisplayOverrides> = {};
+    const prevByArticleId: Record<string, ArticleDisplayOverrides> = {};
+    for (const articleId of peerArticleIds) {
+      const article = articles.find((a) => a.id === articleId)!;
+      patchByArticleId[articleId] = patch;
+      const prev: ArticleDisplayOverrides = {};
+      for (const key of keys) prev[key] = article[key] ?? null;
+      prevByArticleId[articleId] = prev;
+    }
+    pushUndo({ type: "display", patchByArticleId: prevByArticleId });
+    updateArticlesDisplay(patchByArticleId);
+  }
+
+  function openSizePicker(nodeId: string) {
+    const clusterId = targetClusterForNode(nodeId);
+    const node = nodeById.get(nodeId);
+    if (!clusterId || !node) return;
+    setSizePicker({ clusterId, referenceLabel: node.title, referenceRadius: node.r });
+    setContextMenu(null);
+  }
+
+  function applySizeScale(clusterId: string, targetRadius: number) {
+    applyDisplayPatch(clusterId, { radiusOverride: targetRadius });
+    setSizePicker(null);
+  }
+
+  function resetSize(clusterId: string) {
+    applyDisplayPatch(clusterId, { radiusOverride: null });
+    setSizePicker(null);
+  }
+
+  function openTextStylePicker(nodeId: string) {
+    const clusterId = targetClusterForNode(nodeId);
+    const node = nodeById.get(nodeId);
+    if (!clusterId || !node) return;
+    setTextStylePicker({
+      clusterId,
+      referenceLabel: node.title,
+      fontSize: node.fontSize,
+      maxChars: node.maxChars,
+      labelPadding: node.labelPadding,
+    });
+    setContextMenu(null);
+  }
+
+  function applyTextStyle(clusterId: string, values: { fontSize: number; maxChars: number; labelPadding: number }) {
+    applyDisplayPatch(clusterId, {
+      fontSizeOverride: values.fontSize,
+      maxCharsOverride: values.maxChars,
+      labelPaddingOverride: values.labelPadding,
+    });
+    setTextStylePicker(null);
+  }
+
+  function resetTextStyle(clusterId: string) {
+    applyDisplayPatch(clusterId, { fontSizeOverride: null, maxCharsOverride: null, labelPaddingOverride: null });
+    setTextStylePicker(null);
+  }
+
   if (clusters.length === 0) {
     return (
       <section className="panel">
@@ -701,6 +804,12 @@ export function ClusterDiagram() {
                 <button type="button" onClick={() => openSpacingPicker(contextMenu.nodeId)}>
                   Điều chỉnh khoảng trống…
                 </button>
+                <button type="button" onClick={() => openSizePicker(contextMenu.nodeId)}>
+                  Điều chỉnh kích thước…
+                </button>
+                <button type="button" onClick={() => openTextStylePicker(contextMenu.nodeId)}>
+                  Điều chỉnh chữ…
+                </button>
               </>
             )}
           </div>
@@ -730,6 +839,28 @@ export function ClusterDiagram() {
           currentCount={spacingPicker.currentCount}
           onConfirm={(slotCount) => applySpacing(spacingPicker.clusterId, slotCount)}
           onCancel={() => setSpacingPicker(null)}
+        />
+      )}
+
+      {sizePicker && (
+        <SizeAdjustModal
+          referenceLabel={sizePicker.referenceLabel}
+          referenceRadius={sizePicker.referenceRadius}
+          onConfirm={(targetRadius) => applySizeScale(sizePicker.clusterId, targetRadius)}
+          onReset={() => resetSize(sizePicker.clusterId)}
+          onCancel={() => setSizePicker(null)}
+        />
+      )}
+
+      {textStylePicker && (
+        <TextStyleAdjustModal
+          referenceLabel={textStylePicker.referenceLabel}
+          initialFontSize={textStylePicker.fontSize}
+          initialMaxChars={textStylePicker.maxChars}
+          initialLabelPadding={textStylePicker.labelPadding}
+          onConfirm={(values) => applyTextStyle(textStylePicker.clusterId, values)}
+          onReset={() => resetTextStyle(textStylePicker.clusterId)}
+          onCancel={() => setTextStylePicker(null)}
         />
       )}
     </section>

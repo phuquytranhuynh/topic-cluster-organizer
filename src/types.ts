@@ -21,6 +21,14 @@ export interface Article {
   notes: string;
   createdAt: string;
   updatedAt: string;
+  /** custom bubble radius (px) override; null/absent uses the auto depth-based default */
+  radiusOverride?: number | null;
+  /** custom title font size (px) override; null/absent scales automatically with the bubble's radius */
+  fontSizeOverride?: number | null;
+  /** custom max characters per wrapped title line; null/absent scales automatically with the bubble's radius */
+  maxCharsOverride?: number | null;
+  /** custom reserved margin (px) around this bubble for its label to overshoot into; null/absent uses the default */
+  labelPaddingOverride?: number | null;
 }
 
 export interface StoreData {

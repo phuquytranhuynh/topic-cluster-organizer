@@ -51,6 +51,11 @@ export interface AddArticleInput {
   volume?: number | null;
 }
 
+/** Per-article visual customizations for its diagram bubble — see the matching Article fields. */
+export type ArticleDisplayOverrides = Partial<
+  Pick<Article, "radiusOverride" | "fontSizeOverride" | "maxCharsOverride" | "labelPaddingOverride">
+>;
+
 interface StoreApi {
   data: StoreData;
   clusters: TopicCluster[];
@@ -61,6 +66,7 @@ interface StoreApi {
   importRows: (rows: RawCsvRow[]) => ImportResult;
   clusterPillars: (clusterId: string) => Article[];
   updateClusterColor: (clusterId: string, color: string | null) => void;
+  updateArticlesDisplay: (patchByArticleId: Record<string, ArticleDisplayOverrides>) => void;
   replaceAll: (data: StoreData) => void;
   resetAll: () => void;
 }
@@ -263,6 +269,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [commit]
   );
 
+  const updateArticlesDisplay = useCallback(
+    (patchByArticleId: Record<string, ArticleDisplayOverrides>) => {
+      commit((prev) => ({
+        ...prev,
+        articles: prev.articles.map((a) => {
+          const patch = patchByArticleId[a.id];
+          return patch ? { ...a, ...patch } : a;
+        }),
+      }));
+    },
+    [commit]
+  );
+
   const replaceAll = useCallback(
     (next: StoreData) => {
       commit(() => next);
@@ -285,10 +304,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       importRows,
       clusterPillars,
       updateClusterColor,
+      updateArticlesDisplay,
       replaceAll,
       resetAll,
     }),
-    [data, addArticle, updateArticle, deleteArticle, importRows, clusterPillars, updateClusterColor, replaceAll, resetAll]
+    [
+      data,
+      addArticle,
+      updateArticle,
+      deleteArticle,
+      importRows,
+      clusterPillars,
+      updateClusterColor,
+      updateArticlesDisplay,
+      replaceAll,
+      resetAll,
+    ]
   );
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
