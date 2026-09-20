@@ -2,6 +2,7 @@ import * as d3 from "d3";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ColorPickerModal } from "./ColorPickerModal";
 import { DistanceAdjustModal } from "./DistanceAdjustModal";
+import { RotateAdjustModal } from "./RotateAdjustModal";
 import { SizeAdjustModal } from "./SizeAdjustModal";
 import { SpacingAdjustModal } from "./SpacingAdjustModal";
 import { TextStyleAdjustModal } from "./TextStyleAdjustModal";
@@ -71,6 +72,7 @@ export function ClusterDiagram() {
     maxChars: number;
     labelPadding: number;
   } | null>(null);
+  const [rotatePicker, setRotatePicker] = useState<{ clusterId: string } | null>(null);
   overridesRef.current = overrides;
   clustersRef.current = clusters;
   articlesRef.current = articles;
@@ -639,6 +641,31 @@ export function ClusterDiagram() {
     commitOverrides(updates);
   }
 
+  function openRotatePicker(nodeId: string) {
+    const clusterId = targetClusterForNode(nodeId);
+    if (!clusterId) return;
+    setRotatePicker({ clusterId });
+    setContextMenu(null);
+  }
+
+  /**
+   * Spins every peer in this cluster's ring around its Pillar by `degrees` — each peer keeps its
+   * current distance and its angular spacing relative to the others, only the whole ring's orientation
+   * changes. Only bubble POSITIONS rotate; each label is still drawn upright, never rotated with it.
+   */
+  function applyRotation(clusterId: string, degrees: number) {
+    const radians = (degrees * Math.PI) / 180;
+    const updates = applyRingTransform(clusterId, (node, rootPos) => {
+      const dist = Math.hypot(node.cx - rootPos.x, node.cy - rootPos.y);
+      const angle = Math.atan2(node.cy - rootPos.y, node.cx - rootPos.x) + radians;
+      return { x: rootPos.x + dist * Math.cos(angle), y: rootPos.y + dist * Math.sin(angle) };
+    });
+    setRotatePicker(null);
+    if (!updates) return;
+    pushUndo({ type: "position", prev: overrides });
+    commitOverrides(updates);
+  }
+
   /**
    * Writes the same display-override patch onto every peer article in this cluster's ring — used by
    * size and text-style adjustment alike. Passing `null` for a field clears that override, falling
@@ -810,6 +837,9 @@ export function ClusterDiagram() {
                 <button type="button" onClick={() => openTextStylePicker(contextMenu.nodeId)}>
                   Điều chỉnh chữ…
                 </button>
+                <button type="button" onClick={() => openRotatePicker(contextMenu.nodeId)}>
+                  Xoay cấu trúc…
+                </button>
               </>
             )}
           </div>
@@ -861,6 +891,13 @@ export function ClusterDiagram() {
           onConfirm={(values) => applyTextStyle(textStylePicker.clusterId, values)}
           onReset={() => resetTextStyle(textStylePicker.clusterId)}
           onCancel={() => setTextStylePicker(null)}
+        />
+      )}
+
+      {rotatePicker && (
+        <RotateAdjustModal
+          onConfirm={(degrees) => applyRotation(rotatePicker.clusterId, degrees)}
+          onCancel={() => setRotatePicker(null)}
         />
       )}
     </section>
