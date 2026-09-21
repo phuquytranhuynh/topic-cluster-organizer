@@ -32,7 +32,7 @@ Công cụ sắp xếp danh sách bài viết của website thành sơ đồ **T
   - **Một trang duy nhất**: toàn bộ sơ đồ nằm gọn 1 trang PDF, đúng kích thước gốc. Nếu sơ đồ quá lớn vượt khổ trang tối đa mà trình đọc PDF hỗ trợ, hệ thống tự thu nhỏ tỉ lệ để vừa 1 trang (vẫn là vector, zoom trên máy tính vẫn nét — chỉ in giấy sẽ khó đọc hơn).
   - **Chia nhiều trang theo khổ giấy** (A4/A3/A2/A1/A0 ngang): phù hợp khi cần in giấy khổ lớn (poster) cho sơ đồ có hàng nghìn bài viết — các trang có viền chồng lấn để không cắt đứt bong bóng ở mép, kèm trang bìa dạng bản đồ lưới để biết trang nào ghép ở đâu.
 - **Volume Search**: nhập lượt tìm kiếm/tháng cho mỗi bài viết (qua CSV, form nhập tay, hoặc sửa trong Danh sách bài viết) — hiển thị thành 1 dòng số nhỏ ngay bên dưới tiêu đề trong bong bóng, cả trên màn hình lẫn khi xuất PDF.
-- **Xuất / Nhập dữ liệu**: xuất CSV hoặc JSON (sao lưu đầy đủ), nhập lại từ file JSON đã sao lưu. Dữ liệu được lưu tự động trong `localStorage` của trình duyệt.
+- **Xuất / Nhập dữ liệu**: xuất CSV hoặc JSON (sao lưu đầy đủ), nhập lại từ file JSON đã sao lưu. Dữ liệu được lưu tự động trong `localStorage` của trình duyệt. File JSON mang theo cả **vị trí đã kéo thả** của từng bong bóng và trạng thái **ẩn/chỉ hiện chuỗi** ở tab Sơ đồ (2 thứ này bình thường chỉ lưu riêng trong trình duyệt, không tính là "nội dung") — nhập lại đúng file JSON đó, kể cả ở máy/trình duyệt khác, sẽ khôi phục nguyên vẹn cả bố cục lẫn phần đang ẩn. File CSV chỉ có nội dung bài viết, không mang theo 2 thứ này.
 
 ## Định dạng CSV
 
