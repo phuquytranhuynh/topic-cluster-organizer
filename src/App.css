@@ -27,6 +27,18 @@
   font-size: 17px;
 }
 
+.diagram-name-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13.5px;
+  color: var(--text-h);
+  min-width: 220px;
+}
+.diagram-name-field input {
+  font-weight: 600;
+}
+
 .tabs {
   display: flex;
   flex-wrap: wrap;

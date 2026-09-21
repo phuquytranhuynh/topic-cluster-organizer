@@ -35,6 +35,20 @@ function Summary() {
   );
 }
 
+function DiagramNameInput() {
+  const { data, setDiagramName } = useStore();
+  return (
+    <label className="diagram-name-field">
+      Tên sơ đồ
+      <input
+        value={data.diagramName ?? ""}
+        onChange={(e) => setDiagramName(e.target.value)}
+        placeholder="VD: Content Plan Marketing 2026"
+      />
+    </label>
+  );
+}
+
 function AppShell() {
   const [tab, setTab] = useState<Tab>("diagram");
 
@@ -45,6 +59,7 @@ function AppShell() {
           <h1>Topic Cluster Organizer</h1>
           <p className="tagline">Sắp xếp bài viết website thành sơ đồ liên kết Topic Cluster</p>
         </div>
+        <DiagramNameInput />
         <Summary />
       </header>
 

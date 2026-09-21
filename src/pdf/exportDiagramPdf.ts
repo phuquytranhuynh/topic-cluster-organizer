@@ -46,15 +46,15 @@ function nodeIntersectsTile(
 
 function drawCoverPage(
   doc: jsPDF,
-  info: { grid: Grid; clusterCount: number; articleCount: number }
+  info: { grid: Grid; clusterCount: number; articleCount: number; title: string }
 ) {
-  const { grid, clusterCount, articleCount } = info;
+  const { grid, clusterCount, articleCount, title } = info;
   const { pageW, pageH } = grid;
 
   doc.setFont(FONT_NAME, "bold");
   doc.setFontSize(22);
   doc.setTextColor(15, 23, 42);
-  doc.text("Sơ đồ Topic Cluster", pageW / 2, 60, { align: "center" });
+  doc.text(title, pageW / 2, 60, { align: "center" });
 
   doc.setFont(FONT_NAME, "normal");
   doc.setFontSize(12);
@@ -191,10 +191,19 @@ export interface ExportDiagramPdfOptions {
   bounds: Bounds;
   pageFormat: PageFormatId;
   filename?: string;
+  /** shown as the title on the multi-page cover sheet; defaults to a generic label. */
+  title?: string;
 }
 
 export async function exportDiagramToPdf(opts: ExportDiagramPdfOptions): Promise<void> {
-  const { layouts, crossLinks, bounds, pageFormat, filename = "topic-cluster-diagram.pdf" } = opts;
+  const {
+    layouts,
+    crossLinks,
+    bounds,
+    pageFormat,
+    filename = "topic-cluster-diagram.pdf",
+    title = "Sơ đồ Topic Cluster",
+  } = opts;
   if (layouts.length === 0) throw new Error("Không có dữ liệu để xuất.");
 
   const grid = estimatePageGrid(bounds.width, bounds.height, pageFormat);
@@ -205,7 +214,7 @@ export async function exportDiagramToPdf(opts: ExportDiagramPdfOptions): Promise
 
   const singlePage = grid.total === 1;
   if (!singlePage) {
-    drawCoverPage(doc, { grid, clusterCount: layouts.length, articleCount });
+    drawCoverPage(doc, { grid, clusterCount: layouts.length, articleCount, title });
   }
 
   let pageIndex = 0;

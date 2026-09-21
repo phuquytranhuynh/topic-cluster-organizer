@@ -34,6 +34,8 @@ export interface Article {
 export interface StoreData {
   clusters: TopicCluster[];
   articles: Article[];
+  /** user-chosen name for this diagram, used as the base filename when exporting PDF/CSV/JSON */
+  diagramName?: string;
 }
 
 export interface ImportResult {

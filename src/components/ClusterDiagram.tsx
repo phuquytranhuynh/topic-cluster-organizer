@@ -19,6 +19,7 @@ import {
   type RadialNode,
 } from "../diagramLayout";
 import { clearPositions, loadPositions, savePositions, type PositionOverrides } from "../diagramPositions";
+import { sanitizeFilename } from "../filename";
 import { FIT_OPTION, PAGE_FORMATS, estimatePageGrid, type PageFormatId } from "../pdf/pageFormats";
 import { useStore, type ArticleDisplayOverrides } from "../store";
 
@@ -36,7 +37,7 @@ type UndoEntry =
   | { type: "display"; patchByArticleId: Record<string, ArticleDisplayOverrides> };
 
 export function ClusterDiagram() {
-  const { clusters, articles, updateClusterColor, updateArticlesDisplay } = useStore();
+  const { data, clusters, articles, updateClusterColor, updateArticlesDisplay } = useStore();
   const svgRef = useRef<SVGSVGElement>(null);
   const zoomBehaviorRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const currentTransformRef = useRef<d3.ZoomTransform | null>(null);
@@ -503,7 +504,15 @@ export function ClusterDiagram() {
     setExportError(null);
     try {
       const { exportDiagramToPdf } = await import("../pdf/exportDiagramPdf");
-      await exportDiagramToPdf({ layouts, crossLinks, bounds, pageFormat });
+      const baseFilename = sanitizeFilename(data.diagramName ?? "", "topic-cluster-diagram");
+      await exportDiagramToPdf({
+        layouts,
+        crossLinks,
+        bounds,
+        pageFormat,
+        filename: `${baseFilename}.pdf`,
+        title: data.diagramName?.trim() || undefined,
+      });
     } catch (err) {
       setExportError((err as Error).message || "Xuất PDF thất bại.");
     } finally {

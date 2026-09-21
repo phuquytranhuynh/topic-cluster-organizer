@@ -67,6 +67,7 @@ interface StoreApi {
   clusterPillars: (clusterId: string) => Article[];
   updateClusterColor: (clusterId: string, color: string | null) => void;
   updateArticlesDisplay: (patchByArticleId: Record<string, ArticleDisplayOverrides>) => void;
+  setDiagramName: (name: string) => void;
   replaceAll: (data: StoreData) => void;
   resetAll: () => void;
 }
@@ -128,7 +129,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           updatedAt: now,
         };
         created = article;
-        return { clusters, articles: [...prev.articles, article] };
+        return { ...prev, clusters, articles: [...prev.articles, article] };
       });
       return created;
     },
@@ -168,7 +169,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }
             : a
         );
-        return { clusters, articles };
+        return { ...prev, clusters, articles };
       });
     },
     [commit]
@@ -177,6 +178,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const deleteArticle = useCallback(
     (id: string) => {
       commit((prev) => ({
+        ...prev,
         clusters: prev.clusters,
         articles: prev.articles
           .filter((a) => a.id !== id)
@@ -246,7 +248,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         });
 
         importedClusters = clusters.length - clusterSizeBefore;
-        return { clusters, articles };
+        return { ...prev, clusters, articles };
       });
 
       return { importedClusters, importedArticles, errors };
@@ -282,6 +284,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [commit]
   );
 
+  const setDiagramName = useCallback(
+    (name: string) => {
+      commit((prev) => ({ ...prev, diagramName: name }));
+    },
+    [commit]
+  );
+
   const replaceAll = useCallback(
     (next: StoreData) => {
       commit(() => next);
@@ -305,6 +314,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       clusterPillars,
       updateClusterColor,
       updateArticlesDisplay,
+      setDiagramName,
       replaceAll,
       resetAll,
     }),
@@ -317,6 +327,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       clusterPillars,
       updateClusterColor,
       updateArticlesDisplay,
+      setDiagramName,
       replaceAll,
       resetAll,
     ]

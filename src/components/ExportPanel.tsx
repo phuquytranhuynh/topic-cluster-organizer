@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { toCsv } from "../csv";
+import { sanitizeFilename } from "../filename";
 import { useStore } from "../store";
 import type { StoreData } from "../types";
 
@@ -17,8 +18,10 @@ export function ExportPanel() {
   const { data, articles, clusters, replaceAll, resetAll } = useStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const baseFilename = sanitizeFilename(data.diagramName ?? "", "topic-clusters");
+
   function exportJson() {
-    download("topic-clusters.json", JSON.stringify(data, null, 2), "application/json");
+    download(`${baseFilename}.json`, JSON.stringify(data, null, 2), "application/json");
   }
 
   function exportCsv() {
@@ -30,7 +33,7 @@ export function ExportPanel() {
       PillarOf: articles.find((p) => p.id === a.linksTo)?.title ?? "",
       VolumeSearch: a.volume != null ? String(a.volume) : "",
     }));
-    download("topic-clusters.csv", toCsv(rows), "text/csv");
+    download(`${baseFilename}.csv`, toCsv(rows), "text/csv");
   }
 
   function importJsonFile(file: File) {
@@ -83,7 +86,8 @@ export function ExportPanel() {
       </div>
       <p className="hint">
         Dữ liệu được lưu tự động trong trình duyệt này (localStorage). Dùng "Xuất JSON" để sao lưu hoặc chuyển sang
-        máy/trình duyệt khác.
+        máy/trình duyệt khác. Tên file xuất ra lấy theo ô "Tên sơ đồ" ở đầu trang (mặc định "topic-clusters" nếu
+        chưa đặt tên) — hiện tại sẽ là "{baseFilename}.csv" / "{baseFilename}.json".
       </p>
     </section>
   );
