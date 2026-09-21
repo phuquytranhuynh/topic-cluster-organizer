@@ -63,6 +63,8 @@ interface StoreApi {
   addArticle: (input: AddArticleInput) => Article;
   updateArticle: (id: string, patch: Partial<AddArticleInput>) => void;
   deleteArticle: (id: string) => void;
+  /** Deletes every listed cluster and all of its articles in one commit (used to delete a whole chain). */
+  deleteClusters: (clusterIds: string[]) => void;
   importRows: (rows: RawCsvRow[]) => ImportResult;
   clusterPillars: (clusterId: string) => Article[];
   updateClusterColor: (clusterId: string, color: string | null) => void;
@@ -184,6 +186,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           .filter((a) => a.id !== id)
           .map((a) => (a.linksTo === id ? { ...a, linksTo: null } : a)),
       }));
+    },
+    [commit]
+  );
+
+  const deleteClusters = useCallback(
+    (clusterIds: string[]) => {
+      commit((prev) => {
+        const clusterIdSet = new Set(clusterIds);
+        const deletedArticleIds = new Set(
+          prev.articles.filter((a) => clusterIdSet.has(a.clusterId)).map((a) => a.id)
+        );
+        return {
+          ...prev,
+          clusters: prev.clusters.filter((c) => !clusterIdSet.has(c.id)),
+          articles: prev.articles
+            .filter((a) => !clusterIdSet.has(a.clusterId))
+            .map((a) => (a.linksTo && deletedArticleIds.has(a.linksTo) ? { ...a, linksTo: null } : a)),
+        };
+      });
     },
     [commit]
   );
@@ -310,6 +331,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addArticle,
       updateArticle,
       deleteArticle,
+      deleteClusters,
       importRows,
       clusterPillars,
       updateClusterColor,
@@ -323,6 +345,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addArticle,
       updateArticle,
       deleteArticle,
+      deleteClusters,
       importRows,
       clusterPillars,
       updateClusterColor,

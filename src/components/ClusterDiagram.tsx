@@ -19,6 +19,7 @@ import {
   type RadialNode,
 } from "../diagramLayout";
 import { clearPositions, loadPositions, savePositions, type PositionOverrides } from "../diagramPositions";
+import { loadHiddenClusters, saveHiddenClusters, type HiddenClusterIds } from "../diagramVisibility";
 import { sanitizeFilename } from "../filename";
 import { FIT_OPTION, PAGE_FORMATS, estimatePageGrid, type PageFormatId } from "../pdf/pageFormats";
 import { useStore, type ArticleDisplayOverrides } from "../store";
@@ -37,7 +38,7 @@ type UndoEntry =
   | { type: "display"; patchByArticleId: Record<string, ArticleDisplayOverrides> };
 
 export function ClusterDiagram() {
-  const { data, clusters, articles, updateClusterColor, updateArticlesDisplay } = useStore();
+  const { data, clusters, articles, updateClusterColor, updateArticlesDisplay, deleteClusters } = useStore();
   const svgRef = useRef<SVGSVGElement>(null);
   const zoomBehaviorRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const currentTransformRef = useRef<d3.ZoomTransform | null>(null);
@@ -56,6 +57,20 @@ export function ClusterDiagram() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; clusterId: string; nodeId: string } | null>(
     null
   );
+  const contextMenuElRef = useRef<HTMLDivElement | null>(null);
+
+  // The menu's height varies with which buttons show, so its on-screen position can only be clamped
+  // after it renders — a right-click near the window's bottom/right edge would otherwise render it
+  // partly off-screen.
+  useEffect(() => {
+    if (!contextMenu || !contextMenuElRef.current) return;
+    const el = contextMenuElRef.current;
+    const rect = el.getBoundingClientRect();
+    const margin = 8;
+    const dx = Math.min(0, window.innerWidth - margin - rect.right);
+    const dy = Math.min(0, window.innerHeight - margin - rect.bottom);
+    if (dx || dy) el.style.transform = `translate(${dx}px, ${dy}px)`;
+  }, [contextMenu]);
   const [colorPicker, setColorPicker] = useState<{ clusterId: string; initialColor: string } | null>(null);
   const [distancePicker, setDistancePicker] = useState<{
     clusterId: string;
@@ -74,11 +89,101 @@ export function ClusterDiagram() {
     labelPadding: number;
   } | null>(null);
   const [rotatePicker, setRotatePicker] = useState<{ clusterId: string } | null>(null);
+  const [hiddenClusterIds, setHiddenClusterIds] = useState<HiddenClusterIds>(() => loadHiddenClusters());
   overridesRef.current = overrides;
   clustersRef.current = clusters;
   articlesRef.current = articles;
 
-  const { layouts: baseLayouts } = useMemo(() => layoutDiagram(clusters, articles), [clusters, articles]);
+  // clusterId -> ids of clusters chained directly onto it, computed from the FULL (unfiltered) dataset
+  // so hide/delete can see the whole chain even through an already-hidden middle cluster.
+  const chainLinksAll = useMemo(() => resolveClusterChainLinks(articles), [articles]);
+  const childClusterIdsAll = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const [childId, link] of chainLinksAll) {
+      const list = map.get(link.parentClusterId);
+      if (list) list.push(childId);
+      else map.set(link.parentClusterId, [childId]);
+    }
+    return map;
+  }, [chainLinksAll]);
+
+  function collectChainClusterIds(clusterId: string, visited = new Set<string>()): Set<string> {
+    if (visited.has(clusterId)) return visited;
+    visited.add(clusterId);
+    for (const childId of childClusterIdsAll.get(clusterId) ?? []) collectChainClusterIds(childId, visited);
+    return visited;
+  }
+
+  // Every cluster hidden directly, plus everything chained onto it — hiding a chain hides the whole
+  // branch, same scope as delete and as the Ctrl+drag "move whole chain" gesture.
+  const expandedHiddenClusterIds = useMemo(() => {
+    const result = new Set<string>();
+    for (const rootId of Object.keys(hiddenClusterIds)) {
+      for (const id of collectChainClusterIds(rootId)) result.add(id);
+    }
+    return result;
+  }, [hiddenClusterIds, childClusterIdsAll]);
+  const visibleClusters = useMemo(
+    () => clusters.filter((c) => !expandedHiddenClusterIds.has(c.id)),
+    [clusters, expandedHiddenClusterIds]
+  );
+  const visibleArticles = useMemo(
+    () => articles.filter((a) => !expandedHiddenClusterIds.has(a.clusterId)),
+    [articles, expandedHiddenClusterIds]
+  );
+
+  function hideChain(clusterId: string) {
+    setHiddenClusterIds((prev) => {
+      const next = { ...prev, [clusterId]: true as const };
+      saveHiddenClusters(next);
+      return next;
+    });
+    setContextMenu(null);
+  }
+
+  function showChain(clusterId: string) {
+    setHiddenClusterIds((prev) => {
+      const next = { ...prev };
+      delete next[clusterId];
+      saveHiddenClusters(next);
+      return next;
+    });
+  }
+
+  function showAllChains() {
+    setHiddenClusterIds({});
+    saveHiddenClusters({});
+  }
+
+  function deleteChain(clusterId: string) {
+    const idsToDelete = [...collectChainClusterIds(clusterId)];
+    const articleCount = articles.filter((a) => idsToDelete.includes(a.clusterId)).length;
+    const clusterNames = idsToDelete.map((id) => clusters.find((c) => c.id === id)?.name).filter(Boolean);
+    const confirmed = confirm(
+      `Xóa ${idsToDelete.length} cụm (${clusterNames.join(", ")}) cùng ${articleCount} bài viết? Hành động này không thể hoàn tác.`
+    );
+    if (!confirmed) return;
+    deleteClusters(idsToDelete);
+    // A deleted cluster no longer needs to be tracked as hidden.
+    setHiddenClusterIds((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of idsToDelete) {
+        if (next[id]) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      if (changed) saveHiddenClusters(next);
+      return changed ? next : prev;
+    });
+    setContextMenu(null);
+  }
+
+  const { layouts: baseLayouts } = useMemo(
+    () => layoutDiagram(visibleClusters, visibleArticles),
+    [visibleClusters, visibleArticles]
+  );
   const layouts = useMemo(() => applyPositionOverrides(baseLayouts, overrides), [baseLayouts, overrides]);
   const crossLinks = useMemo(() => buildCrossLinks(layouts), [layouts]);
   const bounds = useMemo(() => computeBounds(layouts), [layouts]);
@@ -770,10 +875,25 @@ export function ClusterDiagram() {
         <code>Ctrl</code> (hoặc <code>Cmd</code>) trong lúc kéo để di chuyển cả chuỗi — cụm đang kéo cùng mọi cụm nối
         chuỗi bên dưới nó — theo trỏ chuột. Cuộn chuột hoặc chụm 2 ngón để zoom, kéo nền trống để di chuyển khung
         nhìn. Chuột phải vào 1 bong bóng để đổi màu cho cả cụm; chuột phải vào 1 bong bóng Supporting để điều chỉnh
-        khoảng cách tới Pillar hoặc khoảng trống (góc) giữa các bong bóng Supporting trong cụm. Nhấn{" "}
+        khoảng cách tới Pillar hoặc khoảng trống (góc) giữa các bong bóng Supporting trong cụm; "Ẩn chuỗi này"/"Xóa
+        chuỗi này" ẩn hoặc xóa hẳn cả cụm đó cùng mọi cụm nối chuỗi bên dưới nó. Nhấn{" "}
         <code>Ctrl</code>+<code>Z</code> (hoặc <code>Cmd</code>+<code>Z</code>) để hoàn tác,{" "}
         <code>Ctrl</code>+<code>Shift</code>+<code>Z</code> để làm lại thao tác vừa hoàn tác.
       </p>
+
+      {Object.keys(hiddenClusterIds).length > 0 && (
+        <div className="hidden-chains-panel">
+          <span>Đã ẩn {Object.keys(hiddenClusterIds).length} chuỗi:</span>
+          {Object.keys(hiddenClusterIds).map((id) => (
+            <button key={id} type="button" className="secondary" onClick={() => showChain(id)}>
+              {clusters.find((c) => c.id === id)?.name ?? "(cụm đã xóa)"} — Hiện lại
+            </button>
+          ))}
+          <button type="button" className="secondary" onClick={showAllChains}>
+            Hiện tất cả
+          </button>
+        </div>
+      )}
 
       <div className="row pdf-export-row">
         <label className="inline-label">
@@ -827,6 +947,7 @@ export function ClusterDiagram() {
       {contextMenu && (
         <div className="modal-backdrop" style={{ background: "transparent" }} onClick={() => setContextMenu(null)}>
           <div
+            ref={contextMenuElRef}
             className="context-menu"
             style={{ left: contextMenu.x, top: contextMenu.y }}
             onClick={(e) => e.stopPropagation()}
@@ -853,6 +974,12 @@ export function ClusterDiagram() {
                 </button>
               </>
             )}
+            <button type="button" onClick={() => hideChain(contextMenu.clusterId)}>
+              Ẩn chuỗi này
+            </button>
+            <button type="button" className="danger" onClick={() => deleteChain(contextMenu.clusterId)}>
+              Xóa chuỗi này…
+            </button>
           </div>
         </div>
       )}

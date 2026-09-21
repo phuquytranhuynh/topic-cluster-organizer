@@ -321,6 +321,29 @@ td.actions button {
 .context-menu button:hover {
   background: rgba(37, 99, 235, 0.1);
 }
+.context-menu button.danger {
+  color: var(--danger);
+}
+.context-menu button.danger:hover {
+  background: rgba(220, 38, 38, 0.1);
+}
+
+.hidden-chains-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13.5px;
+  color: var(--text-h);
+}
+.hidden-chains-panel button {
+  font-size: 12.5px;
+  padding: 5px 10px;
+}
 
 .modal-backdrop {
   position: fixed;
