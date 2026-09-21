@@ -167,6 +167,31 @@ td.actions button {
 .badge.supporting {
   background: #0d9488;
 }
+.badge.hidden {
+  background: #64748b;
+  margin-left: 6px;
+}
+
+.bulk-actions-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  font-size: 13.5px;
+  color: var(--text-h);
+}
+.bulk-actions-bar button {
+  font-size: 12.5px;
+  padding: 5px 10px;
+}
+tr.hidden-row {
+  opacity: 0.55;
+}
 
 .form-grid {
   display: grid;

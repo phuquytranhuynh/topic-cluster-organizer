@@ -65,6 +65,8 @@ interface StoreApi {
   deleteArticle: (id: string) => void;
   /** Deletes every listed cluster and all of its articles in one commit (used to delete a whole chain). */
   deleteClusters: (clusterIds: string[]) => void;
+  /** Deletes every listed article in one commit (used for bulk-select delete in the article list). */
+  deleteArticles: (ids: string[]) => void;
   importRows: (rows: RawCsvRow[]) => ImportResult;
   clusterPillars: (clusterId: string) => Article[];
   updateClusterColor: (clusterId: string, color: string | null) => void;
@@ -209,6 +211,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [commit]
   );
 
+  const deleteArticles = useCallback(
+    (ids: string[]) => {
+      commit((prev) => {
+        const idSet = new Set(ids);
+        return {
+          ...prev,
+          articles: prev.articles
+            .filter((a) => !idSet.has(a.id))
+            .map((a) => (a.linksTo && idSet.has(a.linksTo) ? { ...a, linksTo: null } : a)),
+        };
+      });
+    },
+    [commit]
+  );
+
   const importRows = useCallback(
     (rows: RawCsvRow[]): ImportResult => {
       const errors: string[] = [];
@@ -332,6 +349,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateArticle,
       deleteArticle,
       deleteClusters,
+      deleteArticles,
       importRows,
       clusterPillars,
       updateClusterColor,
@@ -346,6 +364,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateArticle,
       deleteArticle,
       deleteClusters,
+      deleteArticles,
       importRows,
       clusterPillars,
       updateClusterColor,

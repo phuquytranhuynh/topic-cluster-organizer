@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { formatVolume } from "../diagramLayout";
+import { loadHiddenArticles, saveHiddenArticles, type HiddenArticleIds } from "../diagramVisibility";
 import { useStore } from "../store";
 import type { Article, ArticleRole } from "../types";
 
@@ -20,6 +21,7 @@ function EditRow({ article, onDone }: { article: Article; onDone: () => void }) 
 
   return (
     <tr className="editing">
+      <td></td>
       <td>
         <input value={title} onChange={(e) => setTitle(e.target.value)} />
       </td>
@@ -56,9 +58,57 @@ function EditRow({ article, onDone }: { article: Article; onDone: () => void }) 
 }
 
 export function ArticleList() {
-  const { articles, clusters, deleteArticle } = useStore();
+  const { articles, clusters, deleteArticle, deleteArticles } = useStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [hiddenArticleIds, setHiddenArticleIds] = useState<HiddenArticleIds>(() => loadHiddenArticles());
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectGroup(items: Article[], checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const a of items) {
+        if (checked) next.add(a.id);
+        else next.delete(a.id);
+      }
+      return next;
+    });
+  }
+
+  function handleBulkDelete() {
+    if (selectedIds.size === 0) return;
+    const confirmed = confirm(`Xóa ${selectedIds.size} bài viết đã chọn? Hành động này không thể hoàn tác.`);
+    if (!confirmed) return;
+    deleteArticles([...selectedIds]);
+    setSelectedIds(new Set());
+  }
+
+  function handleBulkHide() {
+    if (selectedIds.size === 0) return;
+    const next = { ...hiddenArticleIds };
+    for (const id of selectedIds) next[id] = true;
+    setHiddenArticleIds(next);
+    saveHiddenArticles(next);
+    setSelectedIds(new Set());
+  }
+
+  function handleBulkShow() {
+    if (selectedIds.size === 0) return;
+    const next = { ...hiddenArticleIds };
+    for (const id of selectedIds) delete next[id];
+    setHiddenArticleIds(next);
+    saveHiddenArticles(next);
+    setSelectedIds(new Set());
+  }
 
   const grouped = useMemo(() => {
     const query = filter.trim().toLowerCase();
@@ -92,58 +142,102 @@ export function ArticleList() {
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
       />
-      {grouped.map(({ cluster, items }) => (
-        <div key={cluster.id} className="cluster-group">
-          <h3>
-            {cluster.name} <span className="count">({items.length})</span>
-          </h3>
-          {items.length === 0 ? (
-            <p className="hint">Không có bài viết phù hợp.</p>
-          ) : (
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Title</th>
-                    <th>URL</th>
-                    <th>Cluster</th>
-                    <th>Role</th>
-                    <th>Pillar Of</th>
-                    <th>Volume</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((a) =>
-                    editingId === a.id ? (
-                      <EditRow key={a.id} article={a} onDone={() => setEditingId(null)} />
-                    ) : (
-                      <tr key={a.id}>
-                        <td>{a.title}</td>
-                        <td>{a.url}</td>
-                        <td>{cluster.name}</td>
-                        <td>
-                          <span className={`badge ${a.role}`}>{a.role === "pillar" ? "Pillar" : "Supporting"}</span>
-                        </td>
-                        <td>{articles.find((x) => x.id === a.linksTo)?.title ?? "—"}</td>
-                        <td>{a.volume != null ? formatVolume(a.volume) : "—"}</td>
-                        <td className="actions">
-                          <button type="button" onClick={() => setEditingId(a.id)}>
-                            Sửa
-                          </button>
-                          <button type="button" className="danger" onClick={() => deleteArticle(a.id)}>
-                            Xóa
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
+      {selectedIds.size > 0 && (
+        <div className="bulk-actions-bar">
+          <span>{selectedIds.size} bài đã chọn</span>
+          <button type="button" className="secondary" onClick={handleBulkHide}>
+            Ẩn đã chọn
+          </button>
+          <button type="button" className="secondary" onClick={handleBulkShow}>
+            Hiện đã chọn
+          </button>
+          <button type="button" className="danger" onClick={handleBulkDelete}>
+            Xóa đã chọn…
+          </button>
+          <button type="button" className="secondary" onClick={() => setSelectedIds(new Set())}>
+            Bỏ chọn
+          </button>
         </div>
-      ))}
+      )}
+      {Object.keys(hiddenArticleIds).length > 0 && (
+        <p className="hint">
+          {Object.keys(hiddenArticleIds).length} bài viết đang bị ẩn khỏi sơ đồ Topic Cluster (đánh dấu{" "}
+          <span className="badge hidden">Đã ẩn</span> bên dưới). Chọn lại rồi bấm "Hiện đã chọn" để hiện lại.
+        </p>
+      )}
+      {grouped.map(({ cluster, items }) => {
+        const allSelected = items.length > 0 && items.every((a) => selectedIds.has(a.id));
+        return (
+          <div key={cluster.id} className="cluster-group">
+            <h3>
+              {cluster.name} <span className="count">({items.length})</span>
+            </h3>
+            {items.length === 0 ? (
+              <p className="hint">Không có bài viết phù hợp.</p>
+            ) : (
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          onChange={(e) => toggleSelectGroup(items, e.target.checked)}
+                          title="Chọn tất cả bài trong cụm này"
+                        />
+                      </th>
+                      <th>Title</th>
+                      <th>URL</th>
+                      <th>Cluster</th>
+                      <th>Role</th>
+                      <th>Pillar Of</th>
+                      <th>Volume</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((a) =>
+                      editingId === a.id ? (
+                        <EditRow key={a.id} article={a} onDone={() => setEditingId(null)} />
+                      ) : (
+                        <tr key={a.id} className={hiddenArticleIds[a.id] ? "hidden-row" : undefined}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(a.id)}
+                              onChange={() => toggleSelect(a.id)}
+                            />
+                          </td>
+                          <td>
+                            {a.title}
+                            {hiddenArticleIds[a.id] && <span className="badge hidden">Đã ẩn</span>}
+                          </td>
+                          <td>{a.url}</td>
+                          <td>{cluster.name}</td>
+                          <td>
+                            <span className={`badge ${a.role}`}>{a.role === "pillar" ? "Pillar" : "Supporting"}</span>
+                          </td>
+                          <td>{articles.find((x) => x.id === a.linksTo)?.title ?? "—"}</td>
+                          <td>{a.volume != null ? formatVolume(a.volume) : "—"}</td>
+                          <td className="actions">
+                            <button type="button" onClick={() => setEditingId(a.id)}>
+                              Sửa
+                            </button>
+                            <button type="button" className="danger" onClick={() => deleteArticle(a.id)}>
+                              Xóa
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </section>
   );
 }

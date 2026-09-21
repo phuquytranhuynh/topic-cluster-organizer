@@ -19,7 +19,14 @@ import {
   type RadialNode,
 } from "../diagramLayout";
 import { clearPositions, loadPositions, savePositions, type PositionOverrides } from "../diagramPositions";
-import { loadHiddenClusters, saveHiddenClusters, type HiddenClusterIds } from "../diagramVisibility";
+import {
+  loadHiddenArticles,
+  loadHiddenClusters,
+  saveHiddenArticles,
+  saveHiddenClusters,
+  type HiddenArticleIds,
+  type HiddenClusterIds,
+} from "../diagramVisibility";
 import { sanitizeFilename } from "../filename";
 import { FIT_OPTION, PAGE_FORMATS, estimatePageGrid, type PageFormatId } from "../pdf/pageFormats";
 import { useStore, type ArticleDisplayOverrides } from "../store";
@@ -90,6 +97,7 @@ export function ClusterDiagram() {
   } | null>(null);
   const [rotatePicker, setRotatePicker] = useState<{ clusterId: string } | null>(null);
   const [hiddenClusterIds, setHiddenClusterIds] = useState<HiddenClusterIds>(() => loadHiddenClusters());
+  const [hiddenArticleIds, setHiddenArticleIds] = useState<HiddenArticleIds>(() => loadHiddenArticles());
   overridesRef.current = overrides;
   clustersRef.current = clusters;
   articlesRef.current = articles;
@@ -128,9 +136,14 @@ export function ClusterDiagram() {
     [clusters, expandedHiddenClusterIds]
   );
   const visibleArticles = useMemo(
-    () => articles.filter((a) => !expandedHiddenClusterIds.has(a.clusterId)),
-    [articles, expandedHiddenClusterIds]
+    () => articles.filter((a) => !expandedHiddenClusterIds.has(a.clusterId) && !hiddenArticleIds[a.id]),
+    [articles, expandedHiddenClusterIds, hiddenArticleIds]
   );
+
+  function showAllArticles() {
+    setHiddenArticleIds({});
+    saveHiddenArticles({});
+  }
 
   function hideChain(clusterId: string) {
     setHiddenClusterIds((prev) => {
@@ -891,6 +904,17 @@ export function ClusterDiagram() {
           ))}
           <button type="button" className="secondary" onClick={showAllChains}>
             Hiện tất cả
+          </button>
+        </div>
+      )}
+
+      {Object.keys(hiddenArticleIds).length > 0 && (
+        <div className="hidden-chains-panel">
+          <span>
+            Đã ẩn {Object.keys(hiddenArticleIds).length} bài viết riêng lẻ (ẩn từ tab "Danh sách bài viết").
+          </span>
+          <button type="button" className="secondary" onClick={showAllArticles}>
+            Hiện tất cả bài viết
           </button>
         </div>
       )}
