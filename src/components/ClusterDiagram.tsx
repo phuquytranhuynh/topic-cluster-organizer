@@ -131,14 +131,17 @@ export function ClusterDiagram() {
     }
     return result;
   }, [hiddenClusterIds, childClusterIdsAll]);
-  const visibleClusters = useMemo(
-    () => clusters.filter((c) => !expandedHiddenClusterIds.has(c.id)),
-    [clusters, expandedHiddenClusterIds]
-  );
   const visibleArticles = useMemo(
     () => articles.filter((a) => !expandedHiddenClusterIds.has(a.clusterId) && !hiddenArticleIds[a.id]),
     [articles, expandedHiddenClusterIds, hiddenArticleIds]
   );
+  // A cluster with no visible articles left (all individually hidden, or all deleted) shouldn't render
+  // an empty placeholder bubble — distinct from a cluster that still has Supporting articles but no
+  // Pillar yet, which diagramLayout already falls back to showing under the cluster's own name.
+  const visibleClusters = useMemo(() => {
+    const clustersWithVisibleArticles = new Set(visibleArticles.map((a) => a.clusterId));
+    return clusters.filter((c) => !expandedHiddenClusterIds.has(c.id) && clustersWithVisibleArticles.has(c.id));
+  }, [clusters, expandedHiddenClusterIds, visibleArticles]);
 
   function showAllArticles() {
     setHiddenArticleIds({});
@@ -151,6 +154,48 @@ export function ClusterDiagram() {
       saveHiddenClusters(next);
       return next;
     });
+    setContextMenu(null);
+  }
+
+  /**
+   * Hides every OTHER chain, leaving only clusterId (and everything chained below it) visible.
+   * Clusters that branch off unrelated to clusterId are hidden the normal (cascading) way. Ancestors
+   * of clusterId (the chain it's nested inside) are trickier: cluster-hiding one would cascade back
+   * down and hide clusterId too, so instead their own bubbles are hidden individually (the same
+   * non-cascading per-article hide used by the article list's bulk-hide) — that removes the ancestor
+   * from view without touching the chain continuing down through it to clusterId.
+   */
+  function isolateChain(clusterId: string) {
+    const keepIds = collectChainClusterIds(clusterId);
+
+    const ancestorClusterIds: string[] = [];
+    for (let cur = clusterId; ; ) {
+      const parentId = chainLinksAll.get(cur)?.parentClusterId;
+      if (!parentId) break;
+      ancestorClusterIds.push(parentId);
+      cur = parentId;
+    }
+    const pathSet = new Set([clusterId, ...ancestorClusterIds]);
+
+    const nextHiddenClusters: HiddenClusterIds = {};
+    for (const c of clusters) {
+      if (keepIds.has(c.id) || pathSet.has(c.id)) continue;
+      const parentId = chainLinksAll.get(c.id)?.parentClusterId ?? null;
+      if (parentId === null || pathSet.has(parentId)) nextHiddenClusters[c.id] = true;
+    }
+    setHiddenClusterIds(nextHiddenClusters);
+    saveHiddenClusters(nextHiddenClusters);
+
+    if (ancestorClusterIds.length > 0) {
+      const ancestorSet = new Set(ancestorClusterIds);
+      const nextHiddenArticles = { ...hiddenArticleIds };
+      for (const a of articles) {
+        if (ancestorSet.has(a.clusterId)) nextHiddenArticles[a.id] = true;
+      }
+      setHiddenArticleIds(nextHiddenArticles);
+      saveHiddenArticles(nextHiddenArticles);
+    }
+
     setContextMenu(null);
   }
 
@@ -888,8 +933,9 @@ export function ClusterDiagram() {
         <code>Ctrl</code> (hoặc <code>Cmd</code>) trong lúc kéo để di chuyển cả chuỗi — cụm đang kéo cùng mọi cụm nối
         chuỗi bên dưới nó — theo trỏ chuột. Cuộn chuột hoặc chụm 2 ngón để zoom, kéo nền trống để di chuyển khung
         nhìn. Chuột phải vào 1 bong bóng để đổi màu cho cả cụm; chuột phải vào 1 bong bóng Supporting để điều chỉnh
-        khoảng cách tới Pillar hoặc khoảng trống (góc) giữa các bong bóng Supporting trong cụm; "Ẩn chuỗi này"/"Xóa
-        chuỗi này" ẩn hoặc xóa hẳn cả cụm đó cùng mọi cụm nối chuỗi bên dưới nó. Nhấn{" "}
+        khoảng cách tới Pillar hoặc khoảng trống (góc) giữa các bong bóng Supporting trong cụm; "Chỉ hiện chuỗi
+        này"/"Ẩn chuỗi này"/"Xóa chuỗi này" lần lượt là chỉ hiện đúng cụm đó (ẩn hết mọi chuỗi khác), ẩn, hoặc xóa hẳn
+        cả cụm đó cùng mọi cụm nối chuỗi bên dưới nó. Nhấn{" "}
         <code>Ctrl</code>+<code>Z</code> (hoặc <code>Cmd</code>+<code>Z</code>) để hoàn tác,{" "}
         <code>Ctrl</code>+<code>Shift</code>+<code>Z</code> để làm lại thao tác vừa hoàn tác.
       </p>
@@ -998,6 +1044,9 @@ export function ClusterDiagram() {
                 </button>
               </>
             )}
+            <button type="button" onClick={() => isolateChain(contextMenu.clusterId)}>
+              Chỉ hiện chuỗi này
+            </button>
             <button type="button" onClick={() => hideChain(contextMenu.clusterId)}>
               Ẩn chuỗi này
             </button>
