@@ -190,9 +190,11 @@ export function resolveParentClusterIds(articles: Article[]): Map<string, string
  * as "part of that branch", duplicates included) and sits one level deeper for sizing purposes. A
  * standalone cluster — and the fallback for a cycle or a dangling link — gets its own unique hue.
  *
- * A cluster with a manually-set `color` (via the right-click "Đổi màu cụm" picker) overrides all of
- * this: every bubble in that cluster — Pillar and Supporting alike — uses the exact same custom color,
- * and any cluster chained onto it still inherits that color for its own root, same as auto-colors do.
+ * A cluster with a manually-set `color` (via the right-click "Đổi màu cụm" picker) overrides only its
+ * own Supporting bubbles — the Pillar bubble keeps whatever color it already had (auto-generated or
+ * inherited from a parent). Any cluster chained onto this one still inherits its Supporting color for
+ * its own root, same as auto-colors do — so the custom color still cascades down the chain, just never
+ * back onto this cluster's own Pillar.
  */
 function resolveClusterMeta(clusters: TopicCluster[], parentOf: Map<string, string>): Map<string, ClusterMeta> {
   const clusterIds = new Set(clusters.map((c) => c.id));
@@ -218,7 +220,7 @@ function resolveClusterMeta(clusters: TopicCluster[], parentOf: Map<string, stri
       depth = parentMeta.depth + 1;
     }
     const customColor = clusterById.get(clusterId)?.color;
-    if (customColor) colors = { root: customColor, child: customColor };
+    if (customColor) colors = { root: colors.root, child: customColor };
     meta.set(clusterId, { colors, depth });
   }
 

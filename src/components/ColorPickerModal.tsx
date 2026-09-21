@@ -47,7 +47,8 @@ export function ColorPickerModal({
       <div className="modal color-picker-modal" onClick={(e) => e.stopPropagation()}>
         <h3>Đổi màu cụm</h3>
         <p className="hint">
-          Áp dụng cho toàn bộ bong bóng (Pillar và Supporting) trong cụm Topic Cluster hiện tại.
+          Áp dụng cho các bong bóng Supporting trong cụm Topic Cluster hiện tại. Bong bóng Pillar của cụm này giữ
+          nguyên màu hiện tại, không đổi theo.
         </p>
 
         <div className="color-picker-preview-row">

@@ -512,7 +512,9 @@ export function ClusterDiagram() {
   }
 
   function openColorPicker(clusterId: string) {
-    const currentColor = layouts.find((l) => l.cluster.id === clusterId)?.colors.root ?? "#2563eb";
+    // Reference the Supporting color, not the Pillar's — this action only ever recolors Supporting
+    // bubbles, so the picker should preview/start from the color it's actually about to change.
+    const currentColor = layouts.find((l) => l.cluster.id === clusterId)?.colors.child ?? "#2563eb";
     setColorPicker({ clusterId, initialColor: currentColor });
     setContextMenu(null);
   }
