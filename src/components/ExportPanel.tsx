@@ -1,19 +1,12 @@
 import { useRef } from "react";
 import { toCsv } from "../csv";
-import { loadPositions, savePositions, type PositionOverrides } from "../diagramPositions";
-import {
-  loadHiddenArticles,
-  loadHiddenClusters,
-  saveHiddenArticles,
-  saveHiddenClusters,
-  type HiddenArticleIds,
-  type HiddenClusterIds,
-} from "../diagramVisibility";
+import type { PositionOverrides } from "../diagramPositions";
+import type { HiddenArticleIds, HiddenClusterIds } from "../diagramVisibility";
 import { sanitizeFilename } from "../filename";
-import { useStore } from "../store";
+import { useStore, type ReplaceAllInput } from "../store";
 import type { StoreData } from "../types";
 
-/** Everything JSON export/import round-trips beyond the core data — all otherwise per-browser view state. */
+/** Everything JSON export/import round-trips beyond the core data — all otherwise per-diagram view state. */
 interface ExportPayload extends StoreData {
   positions?: PositionOverrides;
   hiddenClusterIds?: HiddenClusterIds;
@@ -31,18 +24,14 @@ function download(filename: string, content: string, mime: string) {
 }
 
 export function ExportPanel() {
-  const { data, articles, clusters, replaceAll, resetAll } = useStore();
+  const { data, articles, clusters, positions, hiddenClusterIds, hiddenArticleIds, replaceAll, resetAll } =
+    useStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const baseFilename = sanitizeFilename(data.diagramName ?? "", "topic-clusters");
 
   function exportJson() {
-    const payload: ExportPayload = {
-      ...data,
-      positions: loadPositions(),
-      hiddenClusterIds: loadHiddenClusters(),
-      hiddenArticleIds: loadHiddenArticles(),
-    };
+    const payload: ExportPayload = { ...data, positions, hiddenClusterIds, hiddenArticleIds };
     download(`${baseFilename}.json`, JSON.stringify(payload, null, 2), "application/json");
   }
 
@@ -65,13 +54,15 @@ export function ExportPanel() {
         if (!Array.isArray(parsed.clusters) || !Array.isArray(parsed.articles)) {
           throw new Error("File JSON không đúng định dạng.");
         }
-        const { positions, hiddenClusterIds, hiddenArticleIds, ...storeData } = parsed;
-        replaceAll(storeData);
-        // Vị trí/ẩn hiện là view state riêng của trình duyệt (không nằm trong StoreData) — khôi phục
-        // lại đúng key localStorage mà ClusterDiagram đọc khi mount, nếu file sao lưu có mang theo.
-        if (positions) savePositions(positions);
-        if (hiddenClusterIds) saveHiddenClusters(hiddenClusterIds);
-        if (hiddenArticleIds) saveHiddenArticles(hiddenArticleIds);
+        const next: ReplaceAllInput = {
+          clusters: parsed.clusters,
+          articles: parsed.articles,
+          diagramName: parsed.diagramName,
+          positions: parsed.positions,
+          hiddenClusterIds: parsed.hiddenClusterIds,
+          hiddenArticleIds: parsed.hiddenArticleIds,
+        };
+        replaceAll(next);
       } catch (err) {
         alert("Không thể nhập file JSON: " + (err as Error).message);
       } finally {
@@ -81,7 +72,7 @@ export function ExportPanel() {
   }
 
   function handleReset() {
-    if (confirm("Xóa toàn bộ dữ liệu hiện tại? Hành động này không thể hoàn tác.")) {
+    if (confirm("Xóa toàn bộ nội dung sơ đồ này? Hành động này không thể hoàn tác.")) {
       resetAll();
     }
   }
@@ -109,19 +100,20 @@ export function ExportPanel() {
           />
         </label>
         <button type="button" className="danger" onClick={handleReset}>
-          Xóa toàn bộ dữ liệu
+          Xóa toàn bộ nội dung sơ đồ này
         </button>
       </div>
       <p className="hint">
-        Dữ liệu được lưu tự động trong trình duyệt này (localStorage). Dùng "Xuất JSON" để sao lưu hoặc chuyển sang
-        máy/trình duyệt khác. Tên file xuất ra lấy theo ô "Tên sơ đồ" ở đầu trang (mặc định "topic-clusters" nếu
-        chưa đặt tên) — hiện tại sẽ là "{baseFilename}.csv" / "{baseFilename}.json".
+        Sơ đồ này được lưu tự động trên máy chủ khi bạn chỉnh sửa. Dùng "Xuất JSON" để tải về sao lưu hoặc chuyển nội
+        dung này sang một sơ đồ/tài khoản khác. Tên file xuất ra lấy theo ô "Tên sơ đồ" ở đầu trang (mặc định
+        "topic-clusters" nếu chưa đặt tên) — hiện tại sẽ là "{baseFilename}.csv" / "{baseFilename}.json".
       </p>
       <p className="hint">
         File JSON mang theo cả <strong>vị trí đã kéo thả</strong> của từng bong bóng và trạng thái{" "}
-        <strong>ẩn/chỉ hiện chuỗi</strong> ở tab Sơ đồ — nhập lại đúng file này (kể cả ở máy/trình duyệt khác) sẽ
-        khôi phục nguyên vẹn cả bố cục lẫn phần đang ẩn, không chỉ nội dung bài viết. File CSV thì không mang theo 2
-        thứ này, chỉ có nội dung bài viết.
+        <strong>ẩn/chỉ hiện chuỗi</strong> ở tab Sơ đồ — nhập lại đúng file này (kể cả vào một sơ đồ khác) sẽ khôi
+        phục nguyên vẹn cả bố cục lẫn phần đang ẩn, không chỉ nội dung bài viết. File CSV thì không mang theo 2 thứ
+        này, chỉ có nội dung bài viết. "Xóa toàn bộ nội dung sơ đồ này" chỉ xóa sơ đồ đang mở, không ảnh hưởng các sơ
+        đồ khác của bạn.
       </p>
     </section>
   );

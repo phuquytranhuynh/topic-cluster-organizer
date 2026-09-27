@@ -2,18 +2,34 @@
 
 Công cụ sắp xếp danh sách bài viết của website thành sơ đồ **Topic Cluster** (mô hình Pillar – Supporting) trực quan, giúp xây dựng cấu trúc liên kết nội dung chặt chẽ cho SEO.
 
+## Nhiều người dùng, lưu trên server
+
+Ứng dụng chạy dạng web app nhiều người dùng (React + Express + MariaDB), triển khai được lên VPS cho cả
+team cùng dùng:
+
+- **Đăng nhập bắt buộc**, không có form tự đăng ký — admin tạo tài khoản cho từng nhân viên trong trang
+  "Quản lý người dùng" (email + mật khẩu + vai trò `admin`/`user`).
+- **Mỗi nhân viên có nhiều sơ đồ riêng** (trang "Sơ đồ của tôi") — tạo mới, mở, đổi tên, xóa. Sơ đồ của
+  ai người đó xem/sửa, **admin xem và mở được sơ đồ của mọi người** (trang "Tất cả sơ đồ") để giám sát,
+  nhưng nhân viên không xem được sơ đồ của nhau.
+- Mọi chỉnh sửa (nội dung, vị trí kéo thả, trạng thái ẩn/chỉ hiện chuỗi) **tự động lưu vào database trên
+  server** — không còn phụ thuộc `localStorage` của từng trình duyệt, mở lại ở máy khác vẫn thấy y hệt.
+  Có chỉ báo "Đang lưu…/Đã lưu" ở đầu trang khi đang chỉnh sửa 1 sơ đồ.
+- Triển khai bằng Docker Compose (1 container app + 1 container MariaDB) — xem hướng dẫn từng bước trong
+  [`DEPLOY.md`](./DEPLOY.md).
+
 ## Tính năng (MVP)
 
 - **Nhập từ CSV**: 2 định dạng —
   - **Cột chuẩn**: `Title`, `URL`, `TopicCluster`, `Role`, `PillarOf`, `VolumeSearch`.
   - **Mã vị trí phân cấp**: chỉ cần `Topic` và `Vị trí trong sơ đồ` (mã số dạng cây, ví dụ `0`, `0.1`, `0.1.2`) — hệ thống tự suy ra Pillar/Supporting và liên kết cụm từ cấu trúc vị trí, không cần khai báo Role/PillarOf thủ công.
 - **Nhập tay**: thêm từng bài viết, chọn/gán vào một cụm Topic Cluster có sẵn hoặc tạo cụm mới, đánh dấu vai trò Pillar (trụ cột) hoặc Supporting (vệ tinh) và liên kết tới bài Pillar tương ứng.
-- **Danh sách bài viết**: xem, sửa, xóa bài viết theo từng cụm. Mỗi dòng có ô chọn (checkbox), ô "chọn tất cả" ở đầu bảng để chọn cả cụm; khi có bài đang chọn, thanh thao tác hàng loạt hiện ra với 3 nút: **"Ẩn đã chọn"** (ẩn riêng từng bài khỏi sơ đồ Topic Cluster — khác với "Ẩn chuỗi này" ở tab sơ đồ vốn ẩn cả cụm, ở đây ẩn đúng những bài đã chọn dù chúng thuộc cụm nào), **"Hiện đã chọn"** (bỏ ẩn), và **"Xóa đã chọn…"** (xóa hẳn, có hộp thoại xác nhận). Bài đang bị ẩn hiển thị mờ đi kèm nhãn "Đã ẩn". Trạng thái ẩn theo bài viết cũng là view-only (lưu trong trình duyệt, không nằm trong dữ liệu xuất CSV/JSON) — có thể bỏ ẩn tất cả từ tab Sơ đồ Topic Cluster.
+- **Danh sách bài viết**: xem, sửa, xóa bài viết theo từng cụm. Mỗi dòng có ô chọn (checkbox), ô "chọn tất cả" ở đầu bảng để chọn cả cụm; khi có bài đang chọn, thanh thao tác hàng loạt hiện ra với 3 nút: **"Ẩn đã chọn"** (ẩn riêng từng bài khỏi sơ đồ Topic Cluster — khác với "Ẩn chuỗi này" ở tab sơ đồ vốn ẩn cả cụm, ở đây ẩn đúng những bài đã chọn dù chúng thuộc cụm nào), **"Hiện đã chọn"** (bỏ ẩn), và **"Xóa đã chọn…"** (xóa hẳn, có hộp thoại xác nhận). Bài đang bị ẩn hiển thị mờ đi kèm nhãn "Đã ẩn". Trạng thái ẩn theo bài viết cũng lưu theo sơ đồ này trên server (không tính là "nội dung" nên không nằm trong CSV, nhưng có trong JSON xuất ra) — có thể bỏ ẩn tất cả từ tab Sơ đồ Topic Cluster.
 - **Sơ đồ Topic Cluster**: mỗi cụm hiển thị dạng bong bóng tỏa tròn — bài Pillar ở trung tâm, các bài Supporting xoay quanh. Bán kính vòng và cỡ bong bóng tự giãn/co theo số lượng bài trong cụm để không bị chồng lấn dù một cụm có vài chục bài.
 - **Màu theo cấp bậc (level)**: cụm gốc (không nối vào cụm nào khác) có tông màu riêng, sinh tự động không trùng với cụm gốc khác. Khi một cụm được nối chuỗi (PillarOf trỏ vào cụm khác), bong bóng Pillar của nó tự động lấy đúng màu Supporting của cụm cha — các cụm cùng nối vào 1 cụm cha sẽ cùng chung màu đó, còn các bài Supporting riêng của từng cụm con vẫn có màu riêng biệt, không trùng nhau.
 - **Kích thước theo cấp bậc**: kích thước một bong bóng chỉ phụ thuộc vào **độ sâu tính từ Pillar gốc**, không phụ thuộc vai trò Pillar hay Supporting. Pillar gốc (level 1) có kích thước x; mọi bong bóng cách nó 1 bước — dù là Supporting ngay trong cụm gốc, hay Pillar của một cụm được nối chuỗi vào — đều có cùng kích thước 0.93x; cách 2 bước là 0.86x; cách 3 bước là 0.79x... giảm đều 7% mỗi bước, tính trên kích thước gốc (không cộng dồn theo cấp số nhân). Nhờ vậy 2 bong bóng "xa gốc như nhau" luôn to bằng nhau, bất kể một cái là Supporting còn cái kia là Pillar của cụm khác.
 - **Nối nhiều cụm thành nhiều level**: một cụm có thể khai báo là "nhánh con" của một bài viết ở cụm khác (cột `PillarOf` trên chính dòng Pillar) — sơ đồ tự vẽ đường nối rõ ràng giữa 2 cụm. Lặp lại để nối bao nhiêu level tùy ý (không giới hạn 2 cấp), phù hợp cho cấu trúc content phân cấp sâu.
-- **Kéo thả để tự sắp xếp**: kéo bong bóng Pillar để di chuyển cả cụm (mọi bài Supporting đi theo); kéo bong bóng Supporting để chỉnh riêng nó. Giữ `Ctrl` (hoặc `Cmd`) trong lúc kéo để di chuyển **cả chuỗi** — cụm đang kéo cùng mọi cụm nối chuỗi bên dưới nó — theo trỏ chuột như một khối liền, các cụm ở nhánh khác (không nằm bên dưới cụm đang kéo) không bị ảnh hưởng. Đường nối luôn bám theo vị trí mới. Vị trí được lưu tự động (localStorage), có nút "Đặt lại vị trí" để quay về bố cục tự động, và PDF xuất ra sẽ theo đúng bố cục đã sắp xếp.
+- **Kéo thả để tự sắp xếp**: kéo bong bóng Pillar để di chuyển cả cụm (mọi bài Supporting đi theo); kéo bong bóng Supporting để chỉnh riêng nó. Giữ `Ctrl` (hoặc `Cmd`) trong lúc kéo để di chuyển **cả chuỗi** — cụm đang kéo cùng mọi cụm nối chuỗi bên dưới nó — theo trỏ chuột như một khối liền, các cụm ở nhánh khác (không nằm bên dưới cụm đang kéo) không bị ảnh hưởng. Đường nối luôn bám theo vị trí mới. Vị trí được lưu tự động vào sơ đồ đang mở (trên server), có nút "Đặt lại vị trí" để quay về bố cục tự động, và PDF xuất ra sẽ theo đúng bố cục đã sắp xếp.
 - **Đổi màu cụm thủ công**: chuột phải vào bất kỳ bong bóng nào trong 1 cụm Topic Cluster → "Đổi màu cụm…" → chọn màu qua bảng màu có sẵn hoặc nhập mã HEX/RGB → Xác nhận. Chỉ các bong bóng **Supporting** trong cụm đó đổi sang đúng màu vừa chọn — bong bóng **Pillar** của cụm giữ nguyên màu hiện tại, không đổi theo. Nếu cụm đó có một cụm khác nối chuỗi vào nó, Pillar của cụm con vẫn tự động lấy đúng màu Supporting mới này (theo đúng rule kế thừa màu đã có). Có thể bấm "Đặt lại màu tự động" trong bảng chọn màu để quay về màu sinh tự động.
 - **"Vòng" của một cụm** (dùng cho 2 mục dưới): gồm mọi bong bóng Supporting thực sự thuộc cụm đó, **cộng thêm** bong bóng Pillar của bất kỳ cụm nào nối chuỗi trực tiếp vào cụm đó — một cụm nối chuỗi đọc như "một vệ tinh" của cụm cha dù về dữ liệu nó là Pillar của chính nó. Nhờ vậy chuột phải vào bong bóng Pillar của 1 cụm đã nối chuỗi (ví dụ "tâm lý học" nối vào cụm "các ngành nghề hot hiện nay") cũng chỉnh được khoảng cách/khoảng trống của **cụm cha**, y hệt như chuột phải vào 1 bong bóng Supporting thường của cụm cha đó.
 - **Điều chỉnh khoảng cách**: chuột phải vào 1 bong bóng thuộc "vòng" của 1 cụm (Supporting thường, hoặc Pillar của cụm con đã nối chuỗi) → "Điều chỉnh khoảng cách…" → bảng hiện khoảng cách hiện tại (px) của đúng bong bóng vừa bấm so với Pillar cụm cha, chỉnh bằng thanh trượt (%) hoặc nhập thẳng số px chính xác mới cho bong bóng đó → Xác nhận. Con số cuối cùng là **khoảng cách tuyệt đối** (px) — sau khi xác nhận, mọi bong bóng khác trong cùng vòng đều được đặt về đúng khoảng cách này tới Pillar, bất kể trước đó chúng xa hơn hay gần hơn (chỉ khoảng cách đổi, hướng của từng bong bóng giữ nguyên, không xoay lại vị trí); nếu 1 thành viên trong vòng là Pillar của 1 cụm nối chuỗi, cả cụm con đó (và mọi cụm nối chuỗi sâu hơn bên dưới) dịch chuyển theo đúng bằng độ dịch của nó. Bong bóng Pillar cụm cha và mọi cụm không liên quan đều đứng yên.
@@ -22,8 +38,8 @@ Công cụ sắp xếp danh sách bài viết của website thành sơ đồ **T
 - **Điều chỉnh chữ trong bong bóng**: chuột phải vào 1 bong bóng thuộc "vòng" của 1 cụm → "Điều chỉnh chữ…" → chỉnh 3 thông số áp dụng cho cả vòng: **cỡ chữ tiêu đề** (px), **số ký tự tối đa mỗi dòng** (càng nhiều thì chữ ít xuống dòng hơn nhưng dòng dài hơn), và **khoảng trống dự phòng ngoài viền bong bóng** (px, phần diện tích ngoài vòng tròn được chừa sẵn trên canvas/PDF để nhãn dài không bị chồng lên bong bóng khác) → Xác nhận. Có nút "Đặt lại tự động" để xóa cả 3 tùy chỉnh, quay về rule mặc định.
 - **Xoay cấu trúc**: chuột phải vào 1 bong bóng thuộc "vòng" của 1 cụm → "Xoay cấu trúc…" → chỉnh góc bằng thanh trượt hoặc nhập số độ chính xác (-180° đến 180°, dương là xoay theo chiều kim đồng hồ) → Xác nhận. Toàn bộ bong bóng trong vòng xoay quanh Pillar đúng theo góc đó, giữ nguyên khoảng cách và thứ tự tương đối giữa các bong bóng — chỉ vị trí góc thay đổi. Chữ bên trong từng bong bóng không bị xoay theo, luôn hiển thị ngay ngắn. Cụm nối chuỗi đi theo y hệt Điều chỉnh khoảng cách/khoảng trống.
 - **Chỉ hiện / Ẩn / Xóa cả chuỗi Topic Cluster**: chuột phải vào bất kỳ bong bóng nào trong 1 cụm → "Chỉ hiện chuỗi này", "Ẩn chuỗi này", hoặc "Xóa chuỗi này…" — cả 3 áp dụng cho **đúng cụm bấm vào cùng mọi cụm nối chuỗi bên dưới nó** (không phải cả "vòng" của cụm cha).
-  - **Chỉ hiện chuỗi này**: ẩn hết mọi chuỗi khác, chỉ để lại đúng cụm vừa bấm cùng mọi cụm nối chuỗi bên dưới nó. Nếu cụm đó lại đang nối chuỗi vào một cụm cha (ví dụ chuột phải vào "Tâm lý học" trong khi nó là nhánh con của "Các ngành nghề hot hiện nay"), cụm cha đó cũng bị ẩn theo — không hiện bong bóng rỗng/gãy kết nối. Cũng là view-only như "Ẩn chuỗi này" bên dưới, không đụng tới dữ liệu.
-  - **Ẩn chuỗi này**: chỉ ẩn khỏi màn hình xem và PDF xuất ra — dữ liệu gốc (bài viết, cụm) không bị xóa, không tính vào file CSV/JSON xuất ra sau đó. Trạng thái ẩn được lưu riêng trong trình duyệt (không phải trong dữ liệu), nên vẫn giữ nguyên sau khi tải lại trang nhưng không đi kèm khi xuất/nhập JSON. Danh sách chuỗi đang ẩn hiện ở 1 dải phía trên sơ đồ, mỗi chuỗi có nút "Hiện lại" riêng, hoặc bấm "Hiện tất cả" để bỏ ẩn hết. ("Chỉ hiện chuỗi này" trên một cụm đang nối chuỗi vào cụm cha còn ẩn thêm đúng bong bóng của (các) cụm cha đó riêng lẻ — xem thêm ở mục "Danh sách bài viết" bên dưới — nên đôi khi cần bấm cả "Hiện tất cả" lẫn "Hiện tất cả bài viết" mới khôi phục lại đầy đủ.)
+  - **Chỉ hiện chuỗi này**: ẩn hết mọi chuỗi khác, chỉ để lại đúng cụm vừa bấm cùng mọi cụm nối chuỗi bên dưới nó. Nếu cụm đó lại đang nối chuỗi vào một cụm cha (ví dụ chuột phải vào "Tâm lý học" trong khi nó là nhánh con của "Các ngành nghề hot hiện nay"), cụm cha đó cũng bị ẩn theo — không hiện bong bóng rỗng/gãy kết nối. Cũng là view-only như "Ẩn chuỗi này" bên dưới, không đụng tới nội dung bài viết/cụm.
+  - **Ẩn chuỗi này**: chỉ ẩn khỏi màn hình xem và PDF xuất ra — dữ liệu gốc (bài viết, cụm) không bị xóa, không tính vào file CSV xuất ra sau đó. Trạng thái ẩn được lưu theo đúng sơ đồ này (trên server, cùng với vị trí kéo thả), không phải là "nội dung" nên vẫn không tính vào CSV, nhưng CÓ đi kèm khi xuất/nhập JSON của sơ đồ này. Danh sách chuỗi đang ẩn hiện ở 1 dải phía trên sơ đồ, mỗi chuỗi có nút "Hiện lại" riêng, hoặc bấm "Hiện tất cả" để bỏ ẩn hết. ("Chỉ hiện chuỗi này" trên một cụm đang nối chuỗi vào cụm cha còn ẩn thêm đúng bong bóng của (các) cụm cha đó riêng lẻ — xem thêm ở mục "Danh sách bài viết" bên dưới — nên đôi khi cần bấm cả "Hiện tất cả" lẫn "Hiện tất cả bài viết" mới khôi phục lại đầy đủ.)
   - **Xóa chuỗi này…**: xóa vĩnh viễn cụm đó cùng mọi bài viết trong nó và mọi cụm nối chuỗi bên dưới (có hộp thoại xác nhận, liệt kê rõ số cụm/bài viết sẽ mất, trước khi xóa thật). Không nằm trong hệ thống Hoàn tác/Làm lại bên dưới — không thể hoàn tác sau khi xác nhận.
 - **Hoàn tác / Làm lại**: khi đang xem sơ đồ, nhấn `Ctrl+Z` (hoặc `Cmd+Z` trên Mac) để hoàn tác lần kéo thả, điều chỉnh khoảng cách/khoảng trống/kích thước/chữ, hoặc đổi màu cụm gần nhất — hữu ích khi lỡ tay chạm nhầm bong bóng làm đổi vị trí. Nhấn `Ctrl+Shift+Z` (hoặc `Cmd+Shift+Z`) để làm lại thao tác vừa hoàn tác.
 - **Đặt tên sơ đồ**: ô "Tên sơ đồ" ở đầu trang (mọi tab) — tên này dùng làm tên file khi xuất PDF, CSV, hoặc JSON, và hiển thị làm tiêu đề trên trang bìa PDF (khi xuất nhiều trang). Bỏ trống thì dùng tên mặc định "topic-clusters" (CSV/JSON) hoặc "topic-cluster-diagram" (PDF).
@@ -32,7 +48,7 @@ Công cụ sắp xếp danh sách bài viết của website thành sơ đồ **T
   - **Một trang duy nhất**: toàn bộ sơ đồ nằm gọn 1 trang PDF, đúng kích thước gốc. Nếu sơ đồ quá lớn vượt khổ trang tối đa mà trình đọc PDF hỗ trợ, hệ thống tự thu nhỏ tỉ lệ để vừa 1 trang (vẫn là vector, zoom trên máy tính vẫn nét — chỉ in giấy sẽ khó đọc hơn).
   - **Chia nhiều trang theo khổ giấy** (A4/A3/A2/A1/A0 ngang): phù hợp khi cần in giấy khổ lớn (poster) cho sơ đồ có hàng nghìn bài viết — các trang có viền chồng lấn để không cắt đứt bong bóng ở mép, kèm trang bìa dạng bản đồ lưới để biết trang nào ghép ở đâu.
 - **Volume Search**: nhập lượt tìm kiếm/tháng cho mỗi bài viết (qua CSV, form nhập tay, hoặc sửa trong Danh sách bài viết) — hiển thị thành 1 dòng số nhỏ ngay bên dưới tiêu đề trong bong bóng, cả trên màn hình lẫn khi xuất PDF.
-- **Xuất / Nhập dữ liệu**: xuất CSV hoặc JSON (sao lưu đầy đủ), nhập lại từ file JSON đã sao lưu. Dữ liệu được lưu tự động trong `localStorage` của trình duyệt. File JSON mang theo cả **vị trí đã kéo thả** của từng bong bóng và trạng thái **ẩn/chỉ hiện chuỗi** ở tab Sơ đồ (2 thứ này bình thường chỉ lưu riêng trong trình duyệt, không tính là "nội dung") — nhập lại đúng file JSON đó, kể cả ở máy/trình duyệt khác, sẽ khôi phục nguyên vẹn cả bố cục lẫn phần đang ẩn. File CSV chỉ có nội dung bài viết, không mang theo 2 thứ này.
+- **Xuất / Nhập dữ liệu**: xuất CSV hoặc JSON (sao lưu đầy đủ của riêng sơ đồ đang mở), nhập lại từ file JSON đã sao lưu — nhập sẽ ghi đè toàn bộ nội dung của đúng sơ đồ đang mở (không tạo sơ đồ mới, không đụng tới các sơ đồ khác). Sơ đồ được lưu tự động trên server khi chỉnh sửa. File JSON mang theo cả **vị trí đã kéo thả** của từng bong bóng và trạng thái **ẩn/chỉ hiện chuỗi** ở tab Sơ đồ — nhập lại đúng file JSON đó (kể cả vào một sơ đồ khác) sẽ khôi phục nguyên vẹn cả bố cục lẫn phần đang ẩn. File CSV chỉ có nội dung bài viết, không mang theo 2 thứ này. "Xóa toàn bộ nội dung sơ đồ này" chỉ xóa đúng sơ đồ đang mở, các sơ đồ khác của bạn (và của người khác) không bị ảnh hưởng.
 
 ## Định dạng CSV
 
@@ -68,10 +84,33 @@ Trong tương lai, ứng dụng sẽ hỗ trợ gợi ý logic sắp xếp Topic
 
 ## Phát triển
 
+Chạy local cần cả 3 phần: MariaDB, server (API), và frontend (Vite dev server có proxy sẵn `/api` sang
+server — xem `vite.config.ts`).
+
 ```bash
+# 1. MariaDB (dùng Docker cho nhanh, hoặc cài MariaDB/MySQL 8.0 sẵn có)
+docker run -d --name tco-db -e MARIADB_ROOT_PASSWORD=rootpass \
+  -e MARIADB_DATABASE=topic_cluster_organizer \
+  -e MARIADB_USER=tco_user -e MARIADB_PASSWORD=changeme \
+  -p 3306:3306 mariadb:11
+
+# 2. Server
+cd server
+cp .env.example .env   # sửa DATABASE_URL nếu khác cổng/mật khẩu ở trên
 npm install
-npm run dev      # chạy dev server
-npm run build    # build production
+npx prisma migrate dev   # tạo bảng lần đầu
+npm run dev               # http://localhost:4000
+
+# 3. Frontend (terminal khác, ở thư mục gốc)
+npm install
+npm run dev               # http://localhost:5173, tự proxy /api sang :4000
 ```
 
-Stack: React + TypeScript + Vite, D3 (vẽ sơ đồ), PapaParse (đọc CSV).
+Đăng nhập lần đầu bằng `ADMIN_EMAIL`/`ADMIN_PASSWORD` trong `server/.env` (tự tạo khi server khởi động
+lần đầu và bảng user còn trống).
+
+Build production: `npm run build` ở cả thư mục gốc (frontend) và `server/` (server) — hoặc dùng
+`docker compose build` để đóng gói cả 2 vào 1 image (xem [`DEPLOY.md`](./DEPLOY.md)).
+
+Stack: React + TypeScript + Vite + React Router (frontend), Express + TypeScript + Prisma + MariaDB
+(server, xác thực bằng JWT lưu trong cookie httpOnly), D3 (vẽ sơ đồ), PapaParse (đọc CSV).

@@ -4,31 +4,15 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import type { Article, ArticleRole, ImportResult, StoreData, TopicCluster } from "./types";
 import { normalizeKey, type RawCsvRow } from "./csv";
-
-const STORAGE_KEY = "topic-cluster-organizer:data:v1";
-
-function loadInitial(): StoreData {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as StoreData;
-  } catch {
-    // ignore corrupt storage, fall back to empty
-  }
-  return { clusters: [], articles: [] };
-}
-
-function persist(data: StoreData) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch {
-    // storage full or unavailable — data still lives in memory for this session
-  }
-}
+import { ApiError, getDiagram, updateDiagram } from "./api";
+import type { PositionOverrides } from "./diagramPositions";
+import type { HiddenArticleIds, HiddenClusterIds } from "./diagramVisibility";
 
 function newId(): string {
   return crypto.randomUUID();
@@ -56,10 +40,36 @@ export type ArticleDisplayOverrides = Partial<
   Pick<Article, "radiusOverride" | "fontSizeOverride" | "maxCharsOverride" | "labelPaddingOverride">
 >;
 
+/** Full round-trip shape for JSON export/import — content plus the view-only extras it now travels with. */
+export interface ReplaceAllInput extends StoreData {
+  positions?: PositionOverrides | null;
+  hiddenClusterIds?: HiddenClusterIds | null;
+  hiddenArticleIds?: HiddenArticleIds | null;
+}
+
+export type SaveStatus = "idle" | "saving" | "saved" | "error";
+
+type Updater<T> = T | ((prev: T) => T);
+function resolveUpdater<T>(next: Updater<T>, prev: T): T {
+  return typeof next === "function" ? (next as (p: T) => T)(prev) : next;
+}
+
 interface StoreApi {
+  diagramId: string;
+  loading: boolean;
+  loadError: string | null;
+  saveStatus: SaveStatus;
+
   data: StoreData;
   clusters: TopicCluster[];
   articles: Article[];
+  positions: PositionOverrides;
+  hiddenClusterIds: HiddenClusterIds;
+  hiddenArticleIds: HiddenArticleIds;
+  setPositions: (next: Updater<PositionOverrides>) => void;
+  setHiddenClusterIds: (next: Updater<HiddenClusterIds>) => void;
+  setHiddenArticleIds: (next: Updater<HiddenArticleIds>) => void;
+
   addArticle: (input: AddArticleInput) => Article;
   updateArticle: (id: string, patch: Partial<AddArticleInput>) => void;
   deleteArticle: (id: string) => void;
@@ -72,7 +82,7 @@ interface StoreApi {
   updateClusterColor: (clusterId: string, color: string | null) => void;
   updateArticlesDisplay: (patchByArticleId: Record<string, ArticleDisplayOverrides>) => void;
   setDiagramName: (name: string) => void;
-  replaceAll: (data: StoreData) => void;
+  replaceAll: (data: ReplaceAllInput) => void;
   resetAll: () => void;
 }
 
@@ -83,19 +93,84 @@ function findClusterByName(clusters: TopicCluster[], name: string): TopicCluster
   return clusters.find((c) => normalizeKey(c.name) === key);
 }
 
-export function StoreProvider({ children }: { children: ReactNode }) {
-  const [data, setData] = useState<StoreData>(loadInitial);
+const SAVE_DEBOUNCE_MS = 700;
 
-  // Persisting here (rather than inside the setState updater below) matters: the updater calls
-  // newId(), so it isn't pure, and React (in StrictMode dev) invokes it twice to check for exactly
-  // that — a second invocation whose result never becomes state but, if persist() ran inside the
-  // updater, would still overwrite localStorage with ids that don't match what's actually rendered.
+export function StoreProvider({ diagramId, children }: { diagramId: string; children: ReactNode }) {
+  const [content, setContent] = useState<StoreData>({ clusters: [], articles: [] });
+  const [positions, setPositionsState] = useState<PositionOverrides>({});
+  const [hiddenClusterIds, setHiddenClusterIdsState] = useState<HiddenClusterIds>({});
+  const [hiddenArticleIds, setHiddenArticleIdsState] = useState<HiddenArticleIds>({});
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+
+  // Set right after a (re)load lands, so the save-effect below can tell "this render is fresh data
+  // from the server" apart from "the user actually changed something" and skip saving the former
+  // straight back to the server it just came from.
+  const skipNextSaveRef = useRef(false);
+
   useEffect(() => {
-    persist(data);
-  }, [data]);
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    getDiagram(diagramId)
+      .then(({ diagram }) => {
+        if (cancelled) return;
+        skipNextSaveRef.current = true;
+        setContent({ clusters: diagram.clusters, articles: diagram.articles, diagramName: diagram.name });
+        setPositionsState(diagram.positions ?? {});
+        setHiddenClusterIdsState(diagram.hiddenClusterIds ?? {});
+        setHiddenArticleIdsState(diagram.hiddenArticleIds ?? {});
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setLoadError(err instanceof ApiError ? err.message : "Không tải được sơ đồ.");
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [diagramId]);
+
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (loading) return;
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      return;
+    }
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    setSaveStatus("saving");
+    saveTimerRef.current = setTimeout(() => {
+      updateDiagram(diagramId, {
+        name: content.diagramName,
+        clusters: content.clusters,
+        articles: content.articles,
+        positions,
+        hiddenClusterIds,
+        hiddenArticleIds,
+      })
+        .then(() => setSaveStatus("saved"))
+        .catch(() => setSaveStatus("error"));
+    }, SAVE_DEBOUNCE_MS);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [content, positions, hiddenClusterIds, hiddenArticleIds, diagramId, loading]);
 
   const commit = useCallback((updater: (prev: StoreData) => StoreData) => {
-    setData((prev) => updater(prev));
+    setContent((prev) => updater(prev));
+  }, []);
+
+  const setPositions = useCallback((next: Updater<PositionOverrides>) => {
+    setPositionsState((prev) => resolveUpdater(next, prev));
+  }, []);
+  const setHiddenClusterIds = useCallback((next: Updater<HiddenClusterIds>) => {
+    setHiddenClusterIdsState((prev) => resolveUpdater(next, prev));
+  }, []);
+  const setHiddenArticleIds = useCallback((next: Updater<HiddenArticleIds>) => {
+    setHiddenArticleIdsState((prev) => resolveUpdater(next, prev));
   }, []);
 
   const getOrCreateCluster = (clusters: TopicCluster[], name: string): [TopicCluster, TopicCluster[]] => {
@@ -295,8 +370,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   );
 
   const clusterPillars = useCallback(
-    (clusterId: string) => data.articles.filter((a) => a.clusterId === clusterId && a.role === "pillar"),
-    [data.articles]
+    (clusterId: string) => content.articles.filter((a) => a.clusterId === clusterId && a.role === "pillar"),
+    [content.articles]
   );
 
   const updateClusterColor = useCallback(
@@ -329,22 +404,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [commit]
   );
 
-  const replaceAll = useCallback(
-    (next: StoreData) => {
-      commit(() => next);
-    },
-    [commit]
-  );
+  const replaceAll = useCallback((next: ReplaceAllInput) => {
+    setContent({ clusters: next.clusters, articles: next.articles, diagramName: next.diagramName });
+    setPositionsState(next.positions ?? {});
+    setHiddenClusterIdsState(next.hiddenClusterIds ?? {});
+    setHiddenArticleIdsState(next.hiddenArticleIds ?? {});
+  }, []);
 
   const resetAll = useCallback(() => {
-    commit(() => ({ clusters: [], articles: [] }));
-  }, [commit]);
+    setContent({ clusters: [], articles: [] });
+    setPositionsState({});
+    setHiddenClusterIdsState({});
+    setHiddenArticleIdsState({});
+  }, []);
 
   const value = useMemo<StoreApi>(
     () => ({
-      data,
-      clusters: data.clusters,
-      articles: data.articles,
+      diagramId,
+      loading,
+      loadError,
+      saveStatus,
+      data: content,
+      clusters: content.clusters,
+      articles: content.articles,
+      positions,
+      hiddenClusterIds,
+      hiddenArticleIds,
+      setPositions,
+      setHiddenClusterIds,
+      setHiddenArticleIds,
       addArticle,
       updateArticle,
       deleteArticle,
@@ -359,7 +447,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       resetAll,
     }),
     [
-      data,
+      diagramId,
+      loading,
+      loadError,
+      saveStatus,
+      content,
+      positions,
+      hiddenClusterIds,
+      hiddenArticleIds,
+      setPositions,
+      setHiddenClusterIds,
+      setHiddenArticleIds,
       addArticle,
       updateArticle,
       deleteArticle,

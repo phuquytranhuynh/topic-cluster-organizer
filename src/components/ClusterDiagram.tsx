@@ -18,15 +18,8 @@ import {
   type DiagramLayout,
   type RadialNode,
 } from "../diagramLayout";
-import { clearPositions, loadPositions, savePositions, type PositionOverrides } from "../diagramPositions";
-import {
-  loadHiddenArticles,
-  loadHiddenClusters,
-  saveHiddenArticles,
-  saveHiddenClusters,
-  type HiddenArticleIds,
-  type HiddenClusterIds,
-} from "../diagramVisibility";
+import type { PositionOverrides } from "../diagramPositions";
+import type { HiddenClusterIds } from "../diagramVisibility";
 import { sanitizeFilename } from "../filename";
 import { FIT_OPTION, PAGE_FORMATS, estimatePageGrid, type PageFormatId } from "../pdf/pageFormats";
 import { useStore, type ArticleDisplayOverrides } from "../store";
@@ -45,7 +38,20 @@ type UndoEntry =
   | { type: "display"; patchByArticleId: Record<string, ArticleDisplayOverrides> };
 
 export function ClusterDiagram() {
-  const { data, clusters, articles, updateClusterColor, updateArticlesDisplay, deleteClusters } = useStore();
+  const {
+    data,
+    clusters,
+    articles,
+    updateClusterColor,
+    updateArticlesDisplay,
+    deleteClusters,
+    positions: overrides,
+    setPositions: setOverrides,
+    hiddenClusterIds,
+    setHiddenClusterIds,
+    hiddenArticleIds,
+    setHiddenArticleIds,
+  } = useStore();
   const svgRef = useRef<SVGSVGElement>(null);
   const zoomBehaviorRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const currentTransformRef = useRef<d3.ZoomTransform | null>(null);
@@ -60,7 +66,6 @@ export function ClusterDiagram() {
   const [pageFormat, setPageFormat] = useState<PageFormatId>("a3");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [overrides, setOverrides] = useState<PositionOverrides>(() => loadPositions());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; clusterId: string; nodeId: string } | null>(
     null
   );
@@ -96,8 +101,6 @@ export function ClusterDiagram() {
     labelPadding: number;
   } | null>(null);
   const [rotatePicker, setRotatePicker] = useState<{ clusterId: string } | null>(null);
-  const [hiddenClusterIds, setHiddenClusterIds] = useState<HiddenClusterIds>(() => loadHiddenClusters());
-  const [hiddenArticleIds, setHiddenArticleIds] = useState<HiddenArticleIds>(() => loadHiddenArticles());
   overridesRef.current = overrides;
   clustersRef.current = clusters;
   articlesRef.current = articles;
@@ -145,15 +148,10 @@ export function ClusterDiagram() {
 
   function showAllArticles() {
     setHiddenArticleIds({});
-    saveHiddenArticles({});
   }
 
   function hideChain(clusterId: string) {
-    setHiddenClusterIds((prev) => {
-      const next = { ...prev, [clusterId]: true as const };
-      saveHiddenClusters(next);
-      return next;
-    });
+    setHiddenClusterIds((prev) => ({ ...prev, [clusterId]: true as const }));
     setContextMenu(null);
   }
 
@@ -184,16 +182,16 @@ export function ClusterDiagram() {
       if (parentId === null || pathSet.has(parentId)) nextHiddenClusters[c.id] = true;
     }
     setHiddenClusterIds(nextHiddenClusters);
-    saveHiddenClusters(nextHiddenClusters);
 
     if (ancestorClusterIds.length > 0) {
       const ancestorSet = new Set(ancestorClusterIds);
-      const nextHiddenArticles = { ...hiddenArticleIds };
-      for (const a of articles) {
-        if (ancestorSet.has(a.clusterId)) nextHiddenArticles[a.id] = true;
-      }
-      setHiddenArticleIds(nextHiddenArticles);
-      saveHiddenArticles(nextHiddenArticles);
+      setHiddenArticleIds((prev) => {
+        const next = { ...prev };
+        for (const a of articles) {
+          if (ancestorSet.has(a.clusterId)) next[a.id] = true;
+        }
+        return next;
+      });
     }
 
     setContextMenu(null);
@@ -203,14 +201,12 @@ export function ClusterDiagram() {
     setHiddenClusterIds((prev) => {
       const next = { ...prev };
       delete next[clusterId];
-      saveHiddenClusters(next);
       return next;
     });
   }
 
   function showAllChains() {
     setHiddenClusterIds({});
-    saveHiddenClusters({});
   }
 
   function deleteChain(clusterId: string) {
@@ -232,7 +228,6 @@ export function ClusterDiagram() {
           changed = true;
         }
       }
-      if (changed) saveHiddenClusters(next);
       return changed ? next : prev;
     });
     setContextMenu(null);
@@ -330,16 +325,11 @@ export function ClusterDiagram() {
   );
 
   function commitOverrides(updates: PositionOverrides) {
-    setOverrides((prev) => {
-      const next = { ...prev, ...updates };
-      savePositions(next);
-      return next;
-    });
+    setOverrides((prev) => ({ ...prev, ...updates }));
   }
 
   function handleResetPositions() {
     setOverrides({});
-    clearPositions();
   }
 
   function pushUndo(entry: UndoEntry) {
@@ -372,7 +362,6 @@ export function ClusterDiagram() {
   function applyEntry(entry: UndoEntry) {
     if (entry.type === "position") {
       setOverrides(entry.prev);
-      savePositions(entry.prev);
     } else if (entry.type === "color") {
       updateClusterColor(entry.clusterId, entry.prevColor);
     } else {

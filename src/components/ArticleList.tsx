@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { formatVolume } from "../diagramLayout";
-import { loadHiddenArticles, saveHiddenArticles, type HiddenArticleIds } from "../diagramVisibility";
 import { useStore } from "../store";
 import type { Article, ArticleRole } from "../types";
 
@@ -58,11 +57,10 @@ function EditRow({ article, onDone }: { article: Article; onDone: () => void }) 
 }
 
 export function ArticleList() {
-  const { articles, clusters, deleteArticle, deleteArticles } = useStore();
+  const { articles, clusters, deleteArticle, deleteArticles, hiddenArticleIds, setHiddenArticleIds } = useStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [hiddenArticleIds, setHiddenArticleIds] = useState<HiddenArticleIds>(() => loadHiddenArticles());
 
   function toggleSelect(id: string) {
     setSelectedIds((prev) => {
@@ -94,19 +92,21 @@ export function ArticleList() {
 
   function handleBulkHide() {
     if (selectedIds.size === 0) return;
-    const next = { ...hiddenArticleIds };
-    for (const id of selectedIds) next[id] = true;
-    setHiddenArticleIds(next);
-    saveHiddenArticles(next);
+    setHiddenArticleIds((prev) => {
+      const next = { ...prev };
+      for (const id of selectedIds) next[id] = true;
+      return next;
+    });
     setSelectedIds(new Set());
   }
 
   function handleBulkShow() {
     if (selectedIds.size === 0) return;
-    const next = { ...hiddenArticleIds };
-    for (const id of selectedIds) delete next[id];
-    setHiddenArticleIds(next);
-    saveHiddenArticles(next);
+    setHiddenArticleIds((prev) => {
+      const next = { ...prev };
+      for (const id of selectedIds) delete next[id];
+      return next;
+    });
     setSelectedIds(new Set());
   }
 

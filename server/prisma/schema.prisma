@@ -1,0 +1,45 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  admin
+  user
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         UserRole  @default(user)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  diagrams     Diagram[]
+}
+
+// Mirrors the client's StoreData (clusters/articles/diagramName) plus the view-only extras already
+// bundled by the JSON export/import feature (drag positions, hidden-chain/hidden-article state) — see
+// src/components/ExportPanel.tsx's ExportPayload. Storing them as JSON keeps this table schema-stable
+// even as the client-side diagram/article shape keeps gaining fields (radius/font overrides, etc.).
+model Diagram {
+  id               String   @id @default(uuid())
+  ownerId          String
+  owner            User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name             String
+  clusters         Json
+  articles         Json
+  positions        Json?
+  hiddenClusterIds Json?
+  hiddenArticleIds Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([ownerId])
+}

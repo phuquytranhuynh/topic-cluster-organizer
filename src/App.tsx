@@ -1,91 +1,54 @@
-import { useState } from "react";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import "./App.css";
-import { ArticleList } from "./components/ArticleList";
-import { ClusterDiagram } from "./components/ClusterDiagram";
-import { CsvImport } from "./components/CsvImport";
-import { ExportPanel } from "./components/ExportPanel";
-import { ManualEntryForm } from "./components/ManualEntryForm";
-import { StoreProvider, useStore } from "./store";
-
-type Tab = "diagram" | "csv" | "manual" | "list" | "data";
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: "diagram", label: "Sơ đồ Topic Cluster" },
-  { id: "csv", label: "Nhập từ CSV" },
-  { id: "manual", label: "Nhập tay" },
-  { id: "list", label: "Danh sách bài viết" },
-  { id: "data", label: "Xuất / Nhập dữ liệu" },
-];
-
-function Summary() {
-  const { clusters, articles } = useStore();
-  const pillarCount = articles.filter((a) => a.role === "pillar").length;
-  return (
-    <div className="summary">
-      <span>
-        <strong>{clusters.length}</strong> cụm chủ đề
-      </span>
-      <span>
-        <strong>{pillarCount}</strong> bài Pillar
-      </span>
-      <span>
-        <strong>{articles.length}</strong> tổng số bài viết
-      </span>
-    </div>
-  );
-}
-
-function DiagramNameInput() {
-  const { data, setDiagramName } = useStore();
-  return (
-    <label className="diagram-name-field">
-      Tên sơ đồ
-      <input
-        value={data.diagramName ?? ""}
-        onChange={(e) => setDiagramName(e.target.value)}
-        placeholder="VD: Content Plan Marketing 2026"
-      />
-    </label>
-  );
-}
-
-function AppShell() {
-  const [tab, setTab] = useState<Tab>("diagram");
-
-  return (
-    <div className="app">
-      <header className="app-header">
-        <div>
-          <h1>Topic Cluster Organizer</h1>
-          <p className="tagline">Sắp xếp bài viết website thành sơ đồ liên kết Topic Cluster</p>
-        </div>
-        <DiagramNameInput />
-        <Summary />
-      </header>
-
-      <nav className="tabs">
-        {TABS.map((t) => (
-          <button key={t.id} type="button" className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}>
-            {t.label}
-          </button>
-        ))}
-      </nav>
-
-      <main>
-        {tab === "diagram" && <ClusterDiagram />}
-        {tab === "csv" && <CsvImport />}
-        {tab === "manual" && <ManualEntryForm />}
-        {tab === "list" && <ArticleList />}
-        {tab === "data" && <ExportPanel />}
-      </main>
-    </div>
-  );
-}
+import { AuthProvider } from "./auth/AuthContext";
+import { RequireAdmin, RequireAuth } from "./auth/RouteGuards";
+import { AdminDiagramsPage } from "./pages/AdminDiagramsPage";
+import { AdminUsersPage } from "./pages/AdminUsersPage";
+import { DiagramEditorPage } from "./pages/DiagramEditorPage";
+import { DiagramListPage } from "./pages/DiagramListPage";
+import { LoginPage } from "./pages/LoginPage";
 
 export default function App() {
   return (
-    <StoreProvider>
-      <AppShell />
-    </StoreProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/"
+            element={
+              <RequireAuth>
+                <DiagramListPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/diagrams/:id"
+            element={
+              <RequireAuth>
+                <DiagramEditorPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <RequireAdmin>
+                <AdminUsersPage />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/diagrams"
+            element={
+              <RequireAdmin>
+                <AdminDiagramsPage />
+              </RequireAdmin>
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }

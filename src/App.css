@@ -13,6 +13,99 @@
   margin-bottom: 20px;
 }
 
+.top-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.top-nav a {
+  padding: 7px 12px;
+  border-radius: 6px;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.top-nav a:hover {
+  background: rgba(37, 99, 235, 0.08);
+}
+.top-nav a.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.user-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  color: var(--text-h);
+}
+
+.diagram-meta-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 4px 0 20px;
+}
+
+.save-status {
+  font-size: 12.5px;
+  color: var(--text);
+  align-self: center;
+}
+.save-status.saving {
+  color: var(--text);
+}
+.save-status.saved {
+  color: #16a34a;
+}
+.save-status.error {
+  color: var(--danger);
+}
+
+.full-page-status {
+  max-width: 1400px;
+  margin: 60px auto;
+  padding: 0 20px;
+  text-align: center;
+  color: var(--text-h);
+  font-size: 15px;
+}
+
+.login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 28px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.login-card h1 {
+  font-size: 20px;
+  margin: 0;
+}
+.login-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13.5px;
+  color: var(--text-h);
+}
+
 .tagline {
   color: var(--text);
 }
