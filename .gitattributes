@@ -1,0 +1,4 @@
+# Force LF line endings for shell scripts regardless of the checkout platform's git config
+# (core.autocrlf=true on Windows otherwise rewrites these to CRLF, which breaks their shebang line
+# inside Linux containers — "exec ./docker-entrypoint.sh: no such file or directory").
+*.sh text eol=lf

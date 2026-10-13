@@ -36,7 +36,10 @@ COPY --from=server-build /app/prisma ./prisma
 COPY --from=server-build /app/package.json ./package.json
 COPY --from=frontend-build /app/dist ./public
 COPY server/docker-entrypoint.sh ./docker-entrypoint.sh
-RUN chmod +x docker-entrypoint.sh
+# Strip any CRLF line endings (e.g. checked out on Windows with core.autocrlf=true) before making it
+# executable — CRLF in the shebang line otherwise makes the container fail with
+# "exec ./docker-entrypoint.sh: no such file or directory".
+RUN sed -i 's/\r$//' docker-entrypoint.sh && chmod +x docker-entrypoint.sh
 
 EXPOSE 4000
 ENTRYPOINT ["./docker-entrypoint.sh"]
