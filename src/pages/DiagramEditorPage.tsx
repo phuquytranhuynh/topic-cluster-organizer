@@ -51,17 +51,17 @@ function DiagramNameInput() {
   );
 }
 
-const SAVE_STATUS_LABEL: Record<SaveStatus, string> = {
+const SAVE_STATUS_LABEL: Record<Exclude<SaveStatus, "error">, string> = {
   idle: "",
   saving: "Đang lưu…",
   saved: "Đã lưu",
-  error: "Lỗi lưu — kiểm tra kết nối mạng",
 };
 
 function SaveStatusIndicator() {
-  const { saveStatus } = useStore();
+  const { saveStatus, saveError } = useStore();
   if (saveStatus === "idle") return null;
-  return <span className={`save-status ${saveStatus}`}>{SAVE_STATUS_LABEL[saveStatus]}</span>;
+  const label = saveStatus === "error" ? `Lỗi lưu: ${saveError ?? "không xác định"}` : SAVE_STATUS_LABEL[saveStatus];
+  return <span className={`save-status ${saveStatus}`}>{label}</span>;
 }
 
 function DiagramEditorShell() {

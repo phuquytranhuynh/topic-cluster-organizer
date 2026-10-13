@@ -86,7 +86,10 @@ router.post("/", async (req, res) => {
 });
 
 const updateSchema = z.object({
-  name: z.string().min(1).optional(),
+  // Unlike create, saving an edit allows an empty name — the "Tên sơ đồ" field has no `required` in
+  // the UI, and autosave fires on every keystroke, so clearing it (even briefly, while retyping) must
+  // not fail the save.
+  name: z.string().optional(),
   clusters: z.array(z.unknown()).optional(),
   articles: z.array(z.unknown()).optional(),
   positions: z.record(z.unknown()).nullable().optional(),

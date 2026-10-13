@@ -59,6 +59,9 @@ interface StoreApi {
   loading: boolean;
   loadError: string | null;
   saveStatus: SaveStatus;
+  /** Set alongside saveStatus === "error" — the real reason (validation message, HTTP status, etc.),
+   * not a guess, so a 400 isn't shown to the user as a network problem. */
+  saveError: string | null;
 
   data: StoreData;
   clusters: TopicCluster[];
@@ -103,6 +106,7 @@ export function StoreProvider({ diagramId, children }: { diagramId: string; chil
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Set right after a (re)load lands, so the save-effect below can tell "this render is fresh data
   // from the server" apart from "the user actually changed something" and skip saving the former
@@ -142,6 +146,7 @@ export function StoreProvider({ diagramId, children }: { diagramId: string; chil
     }
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     setSaveStatus("saving");
+    setSaveError(null);
     saveTimerRef.current = setTimeout(() => {
       updateDiagram(diagramId, {
         name: content.diagramName,
@@ -152,7 +157,10 @@ export function StoreProvider({ diagramId, children }: { diagramId: string; chil
         hiddenArticleIds,
       })
         .then(() => setSaveStatus("saved"))
-        .catch(() => setSaveStatus("error"));
+        .catch((err) => {
+          setSaveStatus("error");
+          setSaveError(err instanceof ApiError ? err.message : "Không kết nối được tới máy chủ.");
+        });
     }, SAVE_DEBOUNCE_MS);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -424,6 +432,7 @@ export function StoreProvider({ diagramId, children }: { diagramId: string; chil
       loading,
       loadError,
       saveStatus,
+      saveError,
       data: content,
       clusters: content.clusters,
       articles: content.articles,
@@ -451,6 +460,7 @@ export function StoreProvider({ diagramId, children }: { diagramId: string; chil
       loading,
       loadError,
       saveStatus,
+      saveError,
       content,
       positions,
       hiddenClusterIds,
